@@ -1,5 +1,6 @@
 import { Composition, CalculateMetadataFunction } from "remotion";
 import { Comic, ComicProps } from "./Comic";
+import { StargateShort, StargateShortProps } from "./StargateShort";
 import { Explainer, ExplainerProps } from "./Explainer";
 import {
   CinematicRenderer,
@@ -300,6 +301,38 @@ export const Root: React.FC = () => {
           fadeOutSeconds: 1.5,
           overlay: true,
         } as EndTagProps}
+      />
+
+      {/* Stargate-local — 60-second animated short (slideshow + narration).
+          Duration scales: sum(panel.duration_seconds) × fps. */}
+      <Composition
+        id="StargateShort"
+        component={StargateShort}
+        durationInFrames={60 * 30}
+        fps={30}
+        width={1920}
+        height={1080}
+        defaultProps={{
+          panels: Array.from({ length: 6 }, (_, i) => ({
+            image_path: "placeholder.png",
+            narration_text: `Panel ${i + 1} narration goes here.`,
+            narration_audio_path: null,
+            duration_seconds: 10,
+          })),
+          title: "STARGATE · SHORT",
+          fps: 30,
+        } as StargateShortProps}
+        calculateMetadata={({ props }) => {
+          const fps = (props.fps as number) ?? 30;
+          const panels = (props.panels as Array<{ duration_seconds?: number }>) ?? [];
+          const totalSec = panels.reduce(
+            (a, p) => a + (p.duration_seconds ?? 10), 0,
+          );
+          return {
+            props,
+            durationInFrames: Math.round(totalSec * fps),
+          };
+        }}
       />
 
       {/* Stargate-local — multi-panel comic composition (Lane 6).

@@ -1,26 +1,28 @@
-"""Stargate-local pipeline runner — minimal CLI for OpenMontage pipelines.
+"""Stargate-local pipeline runner — CLI for OpenMontage pipelines.
 
-Fork-owned module (not in upstream). Executes pipeline_defs/<name>.yaml
-stages in sequence against the tool_registry, with brief / character /
-project passed through to each shim.
+Fork-owned module (no upstream equivalent). Supports:
+  - Tools-available stages (calls tool_registry shims)
+  - llm_step stages (direct OpenAI-compat call to llama-swap)
+  - iterate_over stages (fan-out per-item, e.g. panel × 6)
+  - Remotion compose stages (npx remotion render with calculated props)
+  - Sidecar metadata + POST /output/record on success
 
 Usage:
-    python -m pipeline_runner <pipeline_name> \\
-        --brief "60-second explainer about sunscreen" \\
-        [--character attenborough] \\
-        [--project sunscreen-research] \\
-        [--output-dir /home/edson/stargate/output/productions/] \\
-        [--num-panels 3]  # for comic_stargate
+    python -m pipeline_runner <pipeline> --brief "..." \\
+        [--character <id>] [--project <slug>] [--output-dir <dir>]
 
-Prints per-stage progress to stdout, writes final MP4/PNG to output dir,
-posts to Agent API POST /output/record on success.
+Every pipeline run writes:
+    {output_dir}/{pipeline}_{run_id}.mp4          (if compose succeeded)
+    {output_dir}/{pipeline}_{run_id}.meta.json    (always — provenance)
+    ~/stargate/logs/openmontage-shims.log         (structured per-tool)
 
-See docs/specs/openmontage.md §"Invocation patterns" for more.
+Last stdout line is parseable JSON — OpenClaw subprocess relies on this.
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import subprocess
@@ -43,8 +45,8 @@ except ImportError:
 ROOT = Path(__file__).resolve().parent
 PIPELINE_DIR = ROOT / "pipeline_defs"
 AGENT_API_URL = "http://127.0.0.1:8096"
+LLAMASWAP_URL = "http://127.0.0.1:8080"
 
-# Structured log for operator visibility
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -52,10 +54,44 @@ logging.basicConfig(
 )
 log = logging.getLogger("pipeline_runner")
 
-# Ensure tools/ registry is discovered
 sys.path.insert(0, str(ROOT))
 from tools.tool_registry import registry  # noqa: E402
+from tools._stargate_mode_lease import stargate_mode_lease  # noqa: E402
 registry.discover()
+
+
+# Capabilities that require image_studio / audio_studio GPU modes.
+# Pipeline_runner pre-acquires the lease around iterate stages so multi-item
+# stages don't thrash mode-switch 6x.
+_MODE_FOR_CAPABILITY = {
+    "video_gen": "image_studio",
+    "image_gen": "image_studio",
+    "tts": None,             # Kokoro on P6000 = no switch; Fish/IndexTTS handled by shim
+    "multi_speaker_tts": "audio_studio",
+    "research": None,
+    "url_extract": None,
+    "web_search": None,
+}
+
+
+def _mode_for_stage(stage: dict) -> Optional[str]:
+    """Determine if stage needs a GPU mode lease (returns mode name or None)."""
+    tools = stage.get("tools_available") or []
+    modes_needed: set[str] = set()
+    for tn in tools:
+        tool_cls = registry._tools.get(tn)
+        if tool_cls is None:
+            continue
+        cap = getattr(tool_cls, "capability", "")
+        mode = _MODE_FOR_CAPABILITY.get(cap)
+        if mode:
+            modes_needed.add(mode)
+    if len(modes_needed) == 1:
+        return modes_needed.pop()
+    # Mixed: caller must handle. For now, prefer image_studio if present.
+    if "image_studio" in modes_needed:
+        return "image_studio"
+    return None
 
 
 class PipelineError(Exception):
@@ -63,118 +99,284 @@ class PipelineError(Exception):
 
 
 def load_pipeline(name: str) -> dict:
-    candidates = [PIPELINE_DIR / f"{name}.yaml", PIPELINE_DIR / f"{name}.yml"]
-    for c in candidates:
+    for c in [PIPELINE_DIR / f"{name}.yaml", PIPELINE_DIR / f"{name}.yml"]:
         if c.is_file():
             with c.open("r", encoding="utf-8") as fh:
                 return yaml.safe_load(fh)
     raise PipelineError(f"pipeline '{name}' not found in {PIPELINE_DIR}")
 
 
-def get_tools_for_capability(capability: str, allowlist: list[str] | None = None) -> list:
-    """Return registered tools matching capability, filtered by allowlist."""
-    tools = []
-    for name, cls in registry._tools.items():
-        if getattr(cls, "capability", "") != capability:
-            continue
-        if allowlist is not None and name not in allowlist:
-            continue
-        tools.append(cls)
-    return tools
+# ── LLM step helper ───────────────────────────────────────────────────────
 
+def call_llm_step(stage: dict, *, brief: str, state: dict) -> dict:
+    """Call llama-swap OpenAI-compat endpoint. Parses JSON if requested."""
+    cfg = stage["llm_step"]
+    model = cfg.get("model", "qwopus-27b")
+    system = cfg.get("system_prompt", "")
+    temperature = cfg.get("temperature", 0.7)
+    max_tokens = cfg.get("max_tokens", 2000)
+    parse_json = cfg.get("parse_json", False)
 
-def try_tools_in_order(tools: list, inputs: dict, stage_name: str) -> Optional[dict]:
-    """Try each tool in order; return first successful result dict.
+    user = brief
+    # Hydrate user message with prior stage state for context
+    if state.get("stage_outputs"):
+        ctx_parts = []
+        for s_name, s_out in state["stage_outputs"].items():
+            if not s_out:
+                continue
+            ctx_parts.append(f"{s_name}: {json.dumps(s_out, default=str)[:500]}")
+        if ctx_parts:
+            user = f"{brief}\n\nPrior context:\n" + "\n".join(ctx_parts)
 
-    Each tool's execute returns a ToolResult; we treat .success=True as OK.
-    """
-    for tool_cls in tools:
-        tool = tool_cls() if callable(tool_cls) else tool_cls
-        log.info("  [%s] trying %s", stage_name, tool.name)
+    log.info("  llm_step: model=%s temp=%s (prompt %d chars)", model, temperature, len(user))
+
+    try:
+        r = requests.post(
+            f"{LLAMASWAP_URL}/v1/chat/completions",
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            },
+            timeout=300,
+        )
+        if r.status_code != 200:
+            raise PipelineError(f"llm_step HTTP {r.status_code}: {r.text[:300]}")
+        body = r.json()
+        content = body["choices"][0]["message"]["content"]
+    except requests.RequestException as exc:
+        raise PipelineError(f"llm_step request failed: {exc}")
+
+    log.info("  llm_step: got %d chars", len(content))
+
+    if parse_json:
+        # Try direct parse, else scan for JSON object
+        txt = content.strip()
+        # Strip common wrappers
+        if txt.startswith("```json"):
+            txt = txt[len("```json"):].strip()
+        if txt.endswith("```"):
+            txt = txt[:-3].strip()
+        if txt.startswith("```"):
+            txt = txt[3:].strip()
+        # Find first '{' and matching '}'
+        first = txt.find("{")
+        last = txt.rfind("}")
+        if first >= 0 and last > first:
+            txt = txt[first:last + 1]
         try:
-            result = tool.execute(inputs)
-            if getattr(result, "success", False):
-                log.info("    ✓ %s succeeded (%.1fs)", tool.name, getattr(result, "duration_seconds", 0))
-                return {
-                    "tool": tool.name,
-                    "data": result.data,
-                    "artifacts": result.artifacts,
-                    "duration_s": result.duration_seconds,
-                    "model": result.model,
-                }
-            err = getattr(result, "error", "unknown")
-            log.warning("    ✗ %s failed: %s", tool.name, err[:200])
-        except Exception as exc:  # noqa: BLE001
-            log.warning("    ✗ %s raised %s: %s", tool.name, type(exc).__name__, exc)
+            return json.loads(txt)
+        except json.JSONDecodeError as exc:
+            log.error("llm_step JSON parse failed: %s", exc)
+            log.error("raw content (500 char): %s", content[:500])
+            raise PipelineError(f"llm_step output not valid JSON: {exc}")
+    return {"raw": content}
+
+
+# ── Tool invocation helpers ────────────────────────────────────────────────
+
+def invoke_shim(tool_name: str, inputs: dict) -> Optional[dict]:
+    """Invoke a single shim by name; return {artifacts, data, duration_s} or None."""
+    tool = registry._tools.get(tool_name)
+    if tool is None:
+        log.warning("  tool %s not registered", tool_name)
+        return None
+    try:
+        result = tool.execute(inputs)
+        if getattr(result, "success", False):
+            return {
+                "tool": tool_name,
+                "data": result.data,
+                "artifacts": list(result.artifacts or []),
+                "duration_s": result.duration_seconds,
+                "model": result.model,
+            }
+        err = getattr(result, "error", "unknown")
+        log.warning("  %s → failed: %s", tool_name, str(err)[:200])
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning("  %s → raised %s: %s", tool_name, type(exc).__name__, exc)
+        return None
+
+
+def try_first_working(tool_names: list[str], inputs: dict) -> Optional[dict]:
+    """Try tools in order, return first successful result."""
+    for name in tool_names:
+        log.info("    trying %s", name)
+        result = invoke_shim(name, inputs)
+        if result:
+            log.info("    ✓ %s (%.1fs, %d artifacts)", name, result["duration_s"],
+                     len(result["artifacts"]))
+            return result
     return None
 
 
+# ── Stage executor ─────────────────────────────────────────────────────────
+
 def run_stage(stage: dict, *, brief: str, character: str, project: str,
-              config: dict, state: dict) -> dict:
-    """Execute one pipeline stage. Returns {produces_key: value}."""
-    stage_name = stage["name"]
-    produces = stage.get("produces") or []
-    tools_available = stage.get("tools_available") or []
+              state: dict) -> Optional[dict]:
+    """Execute one stage. Returns stage output dict or None."""
+    name = stage["name"]
     required = stage.get("required", True)
+    log.info("=== stage: %s ===", name)
 
-    log.info("=== stage: %s ===", stage_name)
+    # 1. LLM step
+    if stage.get("llm_step"):
+        try:
+            parsed = call_llm_step(stage, brief=brief, state=state)
+            output_key = stage["llm_step"].get("output_key", "llm_output")
+            return {output_key: parsed}
+        except PipelineError as exc:
+            if required:
+                raise
+            log.warning("  (optional) llm_step failed: %s", exc)
+            return None
 
-    if not tools_available:
-        log.info("  (no tools declared; stage is a placeholder)")
-        return {}
+    # Determine if stage needs a GPU-mode lease; hold for entire stage run
+    stage_mode = _mode_for_stage(stage)
 
-    # Map tool names to capabilities via registry
-    allowlist_providers = config.get("providers", {}).get("allowlist", {})
-    capabilities_by_tool = {}
-    for tn in tools_available:
-        tool_cls = registry._tools.get(tn)
-        if tool_cls:
-            capabilities_by_tool[tn] = getattr(tool_cls, "capability", "")
+    # 2. Iteration over prior stage output
+    iterate_over = stage.get("iterate_over")
+    if iterate_over:
+        # iterate_over like "narration_script.panels"
+        parts = iterate_over.split(".")
+        data: Any = state["stage_outputs"]
+        for p in parts:
+            # Walk through stage_outputs looking for the key
+            if p in data:
+                data = data[p]
+            else:
+                # Walk inside each stage's output dict
+                found = False
+                for so in data.values() if isinstance(data, dict) else []:
+                    if isinstance(so, dict) and p in so:
+                        data = so[p]
+                        found = True
+                        break
+                if not found:
+                    if required:
+                        raise PipelineError(f"iterate_over path '{iterate_over}' not found; have {list((state['stage_outputs'] or {}).keys())}")
+                    return None
 
-    # Group tools by capability
-    by_cap: dict[str, list] = {}
-    for tn, cap in capabilities_by_tool.items():
-        by_cap.setdefault(cap, []).append(registry._tools[tn])
+        if not isinstance(data, list):
+            if required:
+                raise PipelineError(f"iterate_over '{iterate_over}' resolved to {type(data).__name__}, need list")
+            return None
 
-    # For each capability group, try tools in declared order
-    stage_outputs: dict[str, Any] = {}
-    for cap, tool_list in by_cap.items():
-        inputs = {
-            "query": brief,       # research/web_search
-            "prompt": brief,      # image_gen / video_gen
-            "text": brief,        # tts (fallback when no script)
-            "url": brief if brief.startswith("http") else "",  # url_extract
-            "character": character,
-            "project": project,
+        iterate_key = stage.get("iterate_key", "prompt")
+        tool_names = stage.get("tools_available") or []
+        tool_inputs = stage.get("tool_inputs") or {}
+
+        artifacts: list[str] = []
+        per_item: list[dict] = []
+
+        # Wrap iteration in a single mode lease if tools need one
+        if stage_mode:
+            log.info("  stage mode lease: %s (wrapping %d iterations)", stage_mode, len(data))
+            lease_ctx = stargate_mode_lease(stage_mode, duration_minutes=60)
+        else:
+            from contextlib import nullcontext
+            lease_ctx = nullcontext()
+
+        with lease_ctx:
+            for i, item in enumerate(data):
+                item_input = item.get(iterate_key) if isinstance(item, dict) else str(item)
+                inputs = {
+                    "prompt": item_input, "text": item_input, "query": item_input,
+                    "character": character, "project": project,
+                    **tool_inputs,
+                }
+                log.info("  iter %d/%d: %s", i + 1, len(data), (item_input or "")[:60])
+                result = try_first_working(tool_names, inputs)
+                if result:
+                    artifacts.extend(result["artifacts"])
+                    per_item.append(result)
+                else:
+                    if required:
+                        raise PipelineError(f"stage {name} iteration {i} failed")
+
+        return {
+            "artifacts": artifacts,
+            "per_item": per_item,
+            "produces": stage.get("produces") or [],
         }
-        # Hand off any state from prior stages (e.g. panel_script to panel_gen)
-        inputs.update(state.get("stage_inputs", {}).get(stage_name, {}))
 
-        result = try_tools_in_order(tool_list, inputs, stage_name)
-        if result:
-            stage_outputs[cap] = result
+    # 3. Single-shot tool-chain
+    tools_available = stage.get("tools_available") or []
+    if tools_available:
+        inputs = {
+            "prompt": brief, "text": brief, "query": brief,
+            "url": brief if brief.startswith(("http://", "https://")) else "",
+            "character": character, "project": project,
+            **(stage.get("tool_inputs") or {}),
+        }
+        # Wrap single-shot in mode lease too if needed
+        if stage_mode:
+            with stargate_mode_lease(stage_mode, duration_minutes=30):
+                result = try_first_working(tools_available, inputs)
+        else:
+            result = try_first_working(tools_available, inputs)
+        if result is None and required:
+            raise PipelineError(f"stage {name}: all {len(tools_available)} tools failed")
+        return result
 
-    # Map capability results to produces keys
-    if produces:
-        primary = produces[0]
-        # Take whichever capability produced artifacts first
-        for cap, result in stage_outputs.items():
-            if result.get("artifacts"):
-                stage_outputs[primary] = result
-                break
-            stage_outputs.setdefault(primary, result)
+    # 4. Empty stage (compose handled elsewhere, publish is a marker)
+    if stage.get("composition"):
+        return {"composition": stage["composition"]}
 
-    if required and not stage_outputs and tools_available:
-        raise PipelineError(f"stage '{stage_name}' produced nothing with tools {tools_available}")
-
-    return stage_outputs
+    log.info("  (no tools / no llm — marker stage)")
+    return {}
 
 
-def compose_with_remotion(composition: str, props: dict, output_mp4: Path) -> None:
-    """Invoke Remotion renderMedia via npx."""
+# ── Remotion compose ───────────────────────────────────────────────────────
+
+def compose_short(pipeline: dict, state: dict, output_mp4: Path) -> bool:
+    """For stargate_short: stitch 6 images + 6 audios via Remotion StargateShort."""
+    stargate_cfg = pipeline.get("stargate") or {}
+    composition = stargate_cfg.get("composition", "StargateShort")
+
+    # Gather panel images + narration audios from iteration stages
+    panel_images: list[str] = []
+    narration_audios: list[str] = []
+
+    pgen = state["stage_outputs"].get("panel_gen") or {}
+    for item in pgen.get("per_item") or []:
+        panel_images.extend(item.get("artifacts") or [])
+
+    ngen = state["stage_outputs"].get("narration") or {}
+    for item in ngen.get("per_item") or []:
+        narration_audios.extend(item.get("artifacts") or [])
+
+    if not panel_images:
+        log.error("compose: no panel_images collected from panel_gen")
+        return False
+
+    # Narration texts (from script LLM output)
+    script_out = state["stage_outputs"].get("script") or {}
+    nscript = script_out.get("narration_script") or {}
+    panels = nscript.get("panels") or []
+
+    props_data = {
+        "panels": [
+            {
+                "image_path": img,
+                "narration_text": panels[i].get("narration_text", "") if i < len(panels) else "",
+                "narration_audio_path": narration_audios[i] if i < len(narration_audios) else None,
+                "duration_seconds": stargate_cfg.get("panel_duration_seconds", 10),
+            }
+            for i, img in enumerate(panel_images)
+        ],
+        "title": pipeline.get("name", "stargate_short"),
+        "fps": stargate_cfg.get("fps", 30),
+    }
+
     remotion_dir = ROOT / "remotion-composer"
     props_file = output_mp4.parent / f"{output_mp4.stem}.props.json"
-    props_file.write_text(json.dumps(props), encoding="utf-8")
+    props_file.write_text(json.dumps(props_data), encoding="utf-8")
 
     cmd = [
         "npx", "remotion", "render",
@@ -182,45 +384,53 @@ def compose_with_remotion(composition: str, props: dict, output_mp4: Path) -> No
         composition,
         str(output_mp4),
         f"--props={props_file}",
-        "--log=warn",
+        "--log=info",
+        "--concurrency=4",
     ]
-    log.info("  remotion: %s", " ".join(cmd))
+    log.info("  remotion: %s", " ".join(cmd[:5]))
+    # Prefer Node 22 via fnm
+    env = {**__import__("os").environ}
     try:
         r = subprocess.run(cmd, cwd=str(remotion_dir), capture_output=True,
-                           text=True, timeout=1800)
+                           text=True, timeout=1800, env=env)
         if r.returncode != 0:
-            log.error("Remotion error: %s", r.stderr[-500:])
-            raise PipelineError(f"remotion render failed: {r.stderr[-200:]}")
+            log.error("Remotion stdout tail: %s", r.stdout[-300:])
+            log.error("Remotion stderr tail: %s", r.stderr[-500:])
+            return False
+        log.info("  compose: %.1f MB", output_mp4.stat().st_size / 1e6 if output_mp4.is_file() else 0)
+        return output_mp4.is_file()
     except subprocess.TimeoutExpired:
-        raise PipelineError("remotion render timeout (30 min)")
+        log.error("remotion render timed out after 30 min")
+        return False
 
 
-def register_output(file_path: str, category: str, metadata: dict) -> None:
-    """POST to Agent API /output/record. Best-effort — logs failure, doesn't raise."""
+# ── Output registration ───────────────────────────────────────────────────
+
+def register_output(file_path: str, metadata: dict) -> None:
     try:
         r = requests.post(
             f"{AGENT_API_URL}/output/record",
-            json={"file_path": file_path, "category": category, "metadata": metadata},
+            json={"file_path": file_path, "category": "productions", "metadata": metadata},
             timeout=10,
         )
         if r.status_code == 200:
-            body = r.json()
-            log.info("  output registered: id=%s", body.get("output_id"))
+            log.info("  ✓ registered in output_db (%s)", r.json().get("output_id"))
         else:
-            log.warning("  /output/record returned %s: %s", r.status_code, r.text[:200])
+            log.warning("  /output/record: HTTP %s — %s", r.status_code, r.text[:200])
     except requests.RequestException as exc:
-        log.warning("  /output/record unreachable (%s); skipping registration", exc)
+        log.warning("  /output/record unreachable (%s)", exc)
 
+
+# ── Main ──────────────────────────────────────────────────────────────────
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Stargate OpenMontage pipeline runner")
-    parser.add_argument("pipeline", help="Pipeline name (without .yaml)")
-    parser.add_argument("--brief", required=True, help="Brief / user request text")
-    parser.add_argument("--character", default="", help="Stargate character id")
-    parser.add_argument("--project", default="", help="Stargate project slug")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("pipeline")
+    parser.add_argument("--brief", required=True)
+    parser.add_argument("--character", default="")
+    parser.add_argument("--project", default="")
     parser.add_argument("--output-dir", default="/home/edson/stargate/output/productions/")
-    parser.add_argument("--num-panels", type=int, default=3, help="Comic panels count")
-    parser.add_argument("--config", default=str(ROOT / "config.yaml"))
+    parser.add_argument("--num-panels", type=int, default=0, help="Override pipeline default")
     args = parser.parse_args()
 
     t_start = time.time()
@@ -228,105 +438,76 @@ def main() -> int:
     output_dir = Path(args.output_dir).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    log.info("Pipeline %s (run %s) — brief=%r", args.pipeline, run_id, args.brief[:100])
+    log.info("Pipeline %s (run %s) brief=%r character=%s project=%s",
+             args.pipeline, run_id, args.brief[:80], args.character, args.project)
 
     try:
         pipeline = load_pipeline(args.pipeline)
-        config = yaml.safe_load(Path(args.config).read_text()) if Path(args.config).is_file() else {}
-    except Exception as exc:
-        log.error("failed to load: %s", exc)
+    except PipelineError as exc:
         print(json.dumps({"success": False, "error": str(exc)}))
         return 1
 
-    state: dict[str, Any] = {"stage_inputs": {}, "stage_outputs": {}}
+    if args.num_panels > 0:
+        pipeline.setdefault("stargate", {})["num_panels"] = args.num_panels
+
+    state: dict[str, Any] = {"stage_outputs": {}}
+
     try:
         for stage in pipeline.get("stages") or []:
-            outputs = run_stage(
-                stage, brief=args.brief, character=args.character, project=args.project,
-                config=config, state=state,
-            )
-            state["stage_outputs"][stage["name"]] = outputs
-            # Propagate key artifacts to downstream stages
-            if "panel_images" in outputs or any("artifacts" in (o or {}) for o in outputs.values()):
-                pass  # further state threading could be added here
-
-        # Compose final artifact if pipeline has a `compose` stage
-        compose_stage = next((s for s in (pipeline.get("stages") or []) if s["name"] == "compose"), None)
-        final_path: Optional[Path] = None
-        if compose_stage and pipeline.get("stargate", {}).get("composition"):
-            composition = pipeline["stargate"]["composition"]
-            panel_images = []
-            panel_gen = state["stage_outputs"].get("panel_gen") or {}
-            # Gather panel artifacts in order
-            for cap_result in panel_gen.values():
-                if isinstance(cap_result, dict) and cap_result.get("artifacts"):
-                    panel_images.extend(cap_result["artifacts"])
-
-            if not panel_images:
-                # Fallback: 3 blank panels so we still emit something
-                panel_images = ["placeholder.png"] * args.num_panels
-
-            props = {
-                "panels": [
-                    {"image_path": p, "scene_description": f"panel {i+1}",
-                     "dialogue": []}
-                    for i, p in enumerate(panel_images[: args.num_panels])
-                ],
-                "title": args.pipeline,
-                "panel_duration_seconds": 3,
-                "grid": "auto",
-            }
-            final_path = output_dir / f"{args.pipeline}_{run_id}.mp4"
             try:
-                compose_with_remotion(composition, props, final_path)
+                out = run_stage(stage, brief=args.brief, character=args.character,
+                                project=args.project, state=state)
+                state["stage_outputs"][stage["name"]] = out or {}
             except PipelineError as exc:
-                log.warning("compose stage failed: %s — emitting sidecar only", exc)
-                final_path = None
+                log.error("stage %s FATAL: %s", stage["name"], exc)
+                print(json.dumps({
+                    "success": False,
+                    "pipeline": args.pipeline, "run_id": run_id,
+                    "error": str(exc), "failed_stage": stage["name"],
+                    "stage_outputs": {k: (v is not None) for k, v in state["stage_outputs"].items()},
+                }))
+                return 2
 
-        # Sidecar metadata
+        # Compose
+        final_mp4 = output_dir / f"{args.pipeline}_{run_id}.mp4"
+        compose_ok = False
+        if any(s.get("produces") == ["final_mp4"] or "compose" in s["name"] for s in pipeline["stages"]):
+            compose_ok = compose_short(pipeline, state, final_mp4)
+
+        # Sidecar
         metadata = {
             "pipeline": args.pipeline,
             "brief": args.brief,
             "character": args.character,
             "project": args.project,
-            "stages": list(state["stage_outputs"].keys()),
+            "stages_completed": list(state["stage_outputs"].keys()),
             "duration_s": time.time() - t_start,
             "run_id": run_id,
             "timestamp": datetime.utcnow().isoformat() + "Z",
+            "final_mp4_exists": compose_ok,
         }
-        sidecar_path = output_dir / f"{args.pipeline}_{run_id}.meta.json"
-        sidecar_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+        sidecar = output_dir / f"{args.pipeline}_{run_id}.meta.json"
+        sidecar.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
-        # Register via Agent API if we produced a final MP4
-        if final_path and final_path.is_file() and \
-                config.get("output", {}).get("auto_register", True):
-            register_output(str(final_path), "productions", metadata)
+        # Register if compose succeeded
+        if compose_ok and final_mp4.is_file():
+            register_output(str(final_mp4), metadata)
 
         result = {
-            "success": True,
-            "pipeline": args.pipeline,
-            "run_id": run_id,
-            "output_path": str(final_path) if final_path else None,
-            "sidecar_path": str(sidecar_path),
-            "duration_s": time.time() - t_start,
+            "success": compose_ok,
+            "pipeline": args.pipeline, "run_id": run_id,
+            "output_path": str(final_mp4) if compose_ok else None,
+            "sidecar_path": str(sidecar),
+            "duration_s": round(time.time() - t_start, 1),
         }
-        # Last line is parsable JSON for OpenClaw subprocess
         print(json.dumps(result))
-        return 0
+        return 0 if compose_ok else 3
 
-    except PipelineError as exc:
-        log.error("pipeline failed: %s", exc)
-        print(json.dumps({"success": False, "error": str(exc),
-                          "pipeline": args.pipeline, "run_id": run_id}))
-        return 2
-    except KeyboardInterrupt:
-        log.warning("interrupted")
-        return 130
     except Exception as exc:  # noqa: BLE001
         log.exception("unexpected: %s", exc)
-        print(json.dumps({"success": False, "error": f"{type(exc).__name__}: {exc}",
-                          "pipeline": args.pipeline, "run_id": run_id}))
-        return 3
+        print(json.dumps({"success": False, "pipeline": args.pipeline, "run_id": run_id,
+                          "error": f"{type(exc).__name__}: {exc}"}))
+        return 4
 
 
 if __name__ == "__main__":

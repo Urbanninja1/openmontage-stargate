@@ -37,9 +37,9 @@ from tools.base_tool import (
 OUTPUT_DIR_DEFAULT = Path("/home/edson/stargate/output/productions/_image")
 
 WORKFLOW_BY_QUALITY = {
-    "fast": "flux-klein-4b-turbo",
-    "balanced": "flux-klein-9b-turbo",
-    "best": "flux2-dev-turbo-t2i",
+    "fast": "flux2-klein-4b-t2i",
+    "balanced": "flux2-klein-9b-t2i",
+    "best": "flux2-dev-t2i",
 }
 
 

@@ -1,0 +1,127 @@
+name: stargate_short
+version: "0.1"
+description: >
+  Stargate-local 60-second animated short. Slideshow-with-narration format:
+  LLM writes a 60-second voiceover script → 6 FLUX 2 images (10 sec each) →
+  Fish S2-PRO or Kokoro narration → Remotion stitches with ken-burns motion
+  and captions. Fully local, no video gen (fast path), produces a real MP4
+  in 5-10 min wall-clock.
+
+  This pipeline is tuned for pipeline_runner.py (Stargate-local CLI) and
+  does NOT require the upstream agent/skill orchestration. Every stage is
+  either a single-tool call or a direct LLM call via llama-swap.
+category: generated
+stability: beta
+
+default_checkpoint_policy: auto_noncreative
+
+extensions:
+  custom_scripts: true
+
+required_skills: []
+
+orchestration:
+  mode: executive-producer
+  skill: null
+  budget_default_usd: 0.00
+  max_wall_time_minutes: 15
+
+stargate:
+  num_panels: 6
+  panel_duration_seconds: 10
+  panel_width: 1920
+  panel_height: 1080
+  fps: 30
+  composition: StargateShort
+  narration_engine: kokoro      # fast path; switch to fish_stargate for character voice
+  total_duration_seconds: 60
+
+stages:
+  # ── Stage 1: Research (optional — project-bound if set) ─────────
+
+  - name: research
+    skill: null
+    produces:
+      - research_notes
+    tools_available:
+      - searxng_stargate
+    checkpoint_required: false
+    required: false            # skip if SearXNG returns nothing usable
+
+  # ── Stage 2: Script (LLM-driven — pipeline_runner llm_step) ─────
+
+  - name: script
+    skill: null
+    produces:
+      - narration_script       # list of {panel_index, narration_text, image_prompt}
+    llm_step:                  # pipeline_runner inline LLM
+      model: qwopus-27b
+      system_prompt: |
+        You write scripts for 60-second animated shorts. Given a brief,
+        produce exactly 6 panels. Each panel is ~10 seconds of narration
+        (~22-25 words) and a vivid image prompt for FLUX 2 Dev.
+
+        Respond ONLY with valid JSON matching this schema:
+        {
+          "panels": [
+            {"narration_text": "...", "image_prompt": "..."},
+            ... (6 total)
+          ]
+        }
+
+        No prose, no markdown, no prefix — raw JSON only.
+      temperature: 0.8
+      max_tokens: 2000
+      parse_json: true
+      output_key: narration_script
+    required: true
+
+  # ── Stage 3: Image generation (6 panels via FLUX 2) ─────────────
+
+  - name: panel_gen
+    skill: null
+    produces:
+      - panel_images
+    tools_available:
+      - comfy_image_stargate
+    iterate_over: narration_script.panels
+    iterate_key: image_prompt       # Use panel.image_prompt as the shim's `prompt`
+    tool_inputs:                     # Static tool params merged into iteration
+      quality: balanced              # Klein 9B — ~52s per panel, good balance
+      width: 1920
+      height: 1080
+    required: true
+
+  # ── Stage 4: Narration (Kokoro — fast, no mode switch) ─────────
+
+  - name: narration
+    skill: null
+    produces:
+      - narration_audio
+    tools_available:
+      - kokoro_stargate
+    llm_step: null
+    iterate_over: narration_script.panels
+    iterate_key: narration_text
+    tool_inputs:
+      voice_id: af_heart             # Kokoro preset
+    required: true
+
+  # ── Stage 5: Compose (Remotion StargateShort) ───────────────────
+
+  - name: compose
+    skill: null
+    produces:
+      - final_mp4
+    tools_available: []              # Handled by pipeline_runner's compose fn
+    composition: StargateShort
+    required: true
+
+  # ── Stage 6: Publish ───────────────────────────────────────────
+
+  - name: publish
+    skill: null
+    produces:
+      - sidecar
+    tools_available: []
+    required: true                   # Always record to output_db on success

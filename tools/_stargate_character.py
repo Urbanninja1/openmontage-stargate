@@ -152,11 +152,43 @@ def detect_character_in_brief(brief: str) -> Optional[str]:
 def voice_binding_for(char_id: str, engine_hint: str) -> Optional[VoiceBinding]:
     """Convenience: get the VoiceBinding for a specific engine preference.
 
-    Falls back to primary_voice_engine if engine_hint not bound.
+    Character YAMLs use canonical engine keys:
+        fish-s2-pro, kokoro, indextts-2, voxcpm2, vibevoice
+
+    Accepts legacy short forms (fish-s2, indextts) as hints; falls back to
+    any binding matching engine family, then to primary_voice_engine, then
+    to the first available binding.
     """
     char = load_character(char_id)
     if char is None:
         return None
+
+    # Direct hit
     if engine_hint in char.voice_bindings:
         return char.voice_bindings[engine_hint]
-    return char.voice_bindings.get(char.primary_voice_engine)
+
+    # Engine-family aliases — normalize short form to canonical key
+    alias_map = {
+        "fish-s2": "fish-s2-pro",
+        "fish": "fish-s2-pro",
+        "indextts": "indextts-2",
+        "vibevoice-large": "vibevoice",
+    }
+    canonical = alias_map.get(engine_hint, engine_hint)
+    if canonical in char.voice_bindings:
+        return char.voice_bindings[canonical]
+
+    # Partial-match: caller asked for "fish" but char has "fish-s2-pro"
+    for key, binding in char.voice_bindings.items():
+        if engine_hint in key or key.startswith(engine_hint):
+            return binding
+
+    # primary_voice_engine fallback
+    if char.primary_voice_engine in char.voice_bindings:
+        return char.voice_bindings[char.primary_voice_engine]
+
+    # Last resort: first available binding
+    if char.voice_bindings:
+        return next(iter(char.voice_bindings.values()))
+
+    return None
