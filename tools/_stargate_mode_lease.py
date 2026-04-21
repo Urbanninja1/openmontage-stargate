@@ -31,6 +31,7 @@ import logging
 import threading
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Optional
 
 import requests
@@ -48,9 +49,48 @@ _active_lease: contextvars.ContextVar[Optional[dict]] = contextvars.ContextVar(
 _lease_lock = threading.Lock()
 
 
+_API_KEY_CACHED: Optional[str] = None
+_API_KEY_PATHS = [
+    Path("/home/edson/stargate/data/secrets/lane6.env"),
+    Path("/etc/stargate/secrets/lane6.env"),
+]
+
+
 def _api_key() -> Optional[str]:
+    """Read RAG Platform bearer. Priority: env > lane6.env files.
+
+    Lane 6 fix 2026-04-21: previously the shim only read STARGATE_RAG_API_KEY
+    from environment, so every shim invocation from a fresh shell silently
+    fell back to 401 + mode_manager direct path. Now falls through to
+    simple `KEY=value` env files as a convenience.
+    """
     import os
-    return os.environ.get(RAG_API_KEY_ENV)
+    global _API_KEY_CACHED
+    if _API_KEY_CACHED:
+        return _API_KEY_CACHED
+    env_val = os.environ.get(RAG_API_KEY_ENV)
+    if env_val:
+        _API_KEY_CACHED = env_val
+        return env_val
+    for path in _API_KEY_PATHS:
+        try:
+            if not path.is_file():
+                continue
+            for line in path.read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip().lstrip("export ").strip()
+                v = v.strip().strip('"').strip("'")
+                if k == RAG_API_KEY_ENV:
+                    _API_KEY_CACHED = v
+                    return v
+        except (OSError, PermissionError):
+            continue
+    return None
 
 
 def _acquire_lease_platform(mode: str, duration_minutes: int, base: str) -> Optional[dict]:

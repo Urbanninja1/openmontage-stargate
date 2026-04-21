@@ -35,6 +35,13 @@ from typing import Any, Optional
 
 import requests
 
+# GPU pinning: every Stargate shim that calls ComfyUI must see the PCI bus-id
+# ordering + the Mode C 3090 pair (CUDA 2,3). These are no-ops if already set
+# by the caller's shell. See docs/plans/2026-04-21-lane6-pipeline-sota-scope.md
+# pre-flight gap 5.
+os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "2,3")
+
 log = logging.getLogger("stargate_comfy")
 
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188")
