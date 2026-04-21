@@ -152,7 +152,9 @@ class ComfyHunyuanStargate(BaseTool):
                     wf = inject_lora_stack(wf, stack)
 
                 prompt_id = submit_prompt(wf)
-                entry = poll_until_done(prompt_id, timeout_s=900)
+                # 30 min — HunyuanVideo 1.5 cold load (~3 min for 6GB encoder + VAE) +
+                # 33-frame sample at 60-120s/frame can easily cross 15 min baseline.
+                entry = poll_until_done(prompt_id, timeout_s=1800)
                 artifacts = download_artifacts(entry, Path(output_path).parent)
 
                 if not artifacts:

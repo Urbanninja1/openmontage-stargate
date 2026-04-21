@@ -67,16 +67,33 @@ stages:
     skill: null
     produces:
       - panel_script     # list of {panel_index, scene_description, character, dialogue}
-    tools_available: []
+    llm_step:
+      model: qwen3.6-35b-a3b-hauhau-p6000
+      system_prompt: |
+        You write scripts for short illustrated comics. Given a brief, produce
+        exactly 3 panels. Each panel has a visual scene description (for a
+        FLUX 2 Dev image-gen prompt) and optional dialogue (character-voiced).
+
+        Respond ONLY with valid JSON:
+        {
+          "panels": [
+            {"image_prompt": "...vivid, cinematic FLUX 2 prompt...",
+             "dialogue": [{"speaker": "<character display name>", "text": "..."}]
+            },
+            ... (3 total)
+          ]
+        }
+
+        No prose, no markdown, no prefix — raw JSON only.
+      temperature: 0.8
+      max_tokens: 8000
+      parse_json: true
+      output_key: panel_script
     checkpoint_required: true
     human_approval_default: false
-    review_focus:
-      - Each panel has a scene description suitable for image_gen prompt
-      - Character dialogue is in-voice for the bound persona
-      - Story arc flows across panels (setup → action → punchline)
     success_criteria:
       - panel_script has exactly stargate.num_panels entries
-      - Every entry has non-empty scene_description
+      - Every entry has non-empty image_prompt
       - If character is bound, every dialogue line respects persona voice
 
   # ── Panel generation ───────────────────────────────────────────
@@ -87,9 +104,14 @@ stages:
       - panel_images     # list of paths, one per panel
     tools_available:
       - comfy_image_stargate
+    iterate_over: panel_script.panels
+    iterate_key: image_prompt
+    tool_inputs:
+      quality: balanced        # Klein 9B — 3 panels × 52s = ~3 min
+      width: 1024
+      height: 1024
     checkpoint_required: false
     human_approval_default: false
-    parallel: false      # Serialize to avoid ComfyUI queue depth > 3 gate
     review_focus:
       - Character consistency across panels (same LoRA applied)
       - No NSFW / copyrighted-character leakage (character YAML defines bounds)
@@ -103,19 +125,13 @@ stages:
   - name: compose
     skill: null
     produces:
-      - final_artifact    # MP4 or PNG sheet depending on composition mode
-    tools_available:
-      - remotion_compose
+      - final_mp4         # pipeline_runner auto-dispatches compose based on stargate.composition
+    tools_available: []
+    composition: Comic    # drives pipeline_runner.compose_* selection
     checkpoint_required: false
     human_approval_default: false
-    review_focus:
-      - Dialogue bubbles legible, no clipping
-      - Panel grid uses configured layout
-      - Final artifact opens cleanly in QuickTime / VLC (MP4) or Preview (PNG)
     success_criteria:
-      - final_artifact file exists
-      - If MP4, duration >= 3 seconds
-      - If PNG sheet, resolution >= stargate.panel_width × 3
+      - Final MP4 produced + registered in output_db
 
   # ── Publish (metadata + output_db registration) ────────────────
 

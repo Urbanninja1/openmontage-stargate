@@ -135,14 +135,28 @@ class ComfyImageStargate(BaseTool):
             OUTPUT_DIR_DEFAULT.mkdir(parents=True, exist_ok=True)
             output_path = str(OUTPUT_DIR_DEFAULT / f"flux_{uuid.uuid4().hex[:8]}.png")
 
-        # Character LoRA auto-routing
+        # Character LoRA auto-routing — check disk before injecting so missing
+        # LoRAs don't cause workflow validation to fail (char LoRAs were cut
+        # from Voice+Character Stack Phase 9 per roadmap).
         lora_stack = list(inputs.get("lora_stack") or [])
         character_id = inputs.get("character")
         if character_id:
-            character_lora = f"flux2-dev/character/{character_id}.safetensors"
-            if not any(L.get("name") == character_lora for L in lora_stack):
-                # Optimistic inject; workflow LoRA loader will error loud if file missing
-                lora_stack.insert(0, {"name": character_lora, "weight": 0.85})
+            lora_rel = f"flux2-dev/character/{character_id}.safetensors"
+            # Try a few ways character folders are named (dr-house vs dr_house)
+            for cid in (character_id, character_id.replace("-", "_")):
+                candidate_abs = Path(f"/models/comfyui/loras/flux2-dev/character/{cid}/lora.safetensors")
+                candidate_flat = Path(f"/models/comfyui/loras/flux2-dev/character/{cid}.safetensors")
+                if candidate_flat.is_file():
+                    lora_rel = f"flux2-dev/character/{cid}.safetensors"
+                    break
+                if candidate_abs.is_file():
+                    lora_rel = f"flux2-dev/character/{cid}/lora.safetensors"
+                    break
+            else:
+                # no file found — skip LoRA injection entirely
+                lora_rel = None
+            if lora_rel and not any(L.get("name") == lora_rel for L in lora_stack):
+                lora_stack.insert(0, {"name": lora_rel, "weight": 0.85})
 
         try:
             with stargate_mode_lease("image_studio", duration_minutes=15):

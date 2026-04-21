@@ -373,10 +373,12 @@ def compose_short(pipeline: dict, state: dict, output_mp4: Path) -> bool:
         log.error("compose: no panel_images collected from panel_gen")
         return False
 
-    # Narration texts (from script LLM output)
+    # Panel metadata from script LLM output — key differs per pipeline
     script_out = state["stage_outputs"].get("script") or {}
-    nscript = script_out.get("narration_script") or {}
-    panels = nscript.get("panels") or []
+    nscript = (script_out.get("narration_script")
+               or script_out.get("panel_script")
+               or {})
+    panels_meta = nscript.get("panels") or []
 
     # Remotion's headless Chromium blocks file:/// URLs ("Not allowed to load local resource").
     # Stage assets into a run-specific public dir, reference them by relative path, and pass
@@ -408,20 +410,39 @@ def compose_short(pipeline: dict, state: dict, output_mp4: Path) -> bool:
         shutil.copy2(src, dst)
         staged_audios.append(dst.name)
 
-    props_data = {
-        "panels": [
-            {
-                # Relative name — resolved by Remotion staticFile() against --public-dir
-                "image_path": staged_panels[i] if i < len(staged_panels) else "",
-                "narration_text": panels[i].get("narration_text", "") if i < len(panels) else "",
-                "narration_audio_path": staged_audios[i] if i < len(staged_audios) else None,
-                "duration_seconds": stargate_cfg.get("panel_duration_seconds", 10),
-            }
-            for i in range(len(staged_panels))
-        ],
-        "title": pipeline.get("name", "stargate_short"),
-        "fps": stargate_cfg.get("fps", 30),
-    }
+    # Compose props — per-composition shape
+    if composition == "Comic":
+        props_data = {
+            "panels": [
+                {
+                    "image_path": staged_panels[i],
+                    "scene_description": (panels_meta[i].get("image_prompt", "")[:80]
+                                          if i < len(panels_meta) else ""),
+                    "dialogue": (panels_meta[i].get("dialogue") or []
+                                 if i < len(panels_meta) else []),
+                }
+                for i in range(len(staged_panels))
+            ],
+            "title": pipeline.get("name", "comic"),
+            "grid": "auto",
+            "panel_duration_seconds": stargate_cfg.get("panel_duration_seconds", 4),
+        }
+    else:
+        # StargateShort default
+        props_data = {
+            "panels": [
+                {
+                    "image_path": staged_panels[i] if i < len(staged_panels) else "",
+                    "narration_text": (panels_meta[i].get("narration_text", "")
+                                        if i < len(panels_meta) else ""),
+                    "narration_audio_path": staged_audios[i] if i < len(staged_audios) else None,
+                    "duration_seconds": stargate_cfg.get("panel_duration_seconds", 10),
+                }
+                for i in range(len(staged_panels))
+            ],
+            "title": pipeline.get("name", "stargate_short"),
+            "fps": stargate_cfg.get("fps", 30),
+        }
 
     remotion_dir = ROOT / "remotion-composer"
     props_file = output_mp4.parent / f"{output_mp4.stem}.props.json"

@@ -165,7 +165,8 @@ class ComfyWanStargate(BaseTool):
                     wf = inject_lora_stack(wf, stack)
 
                 prompt_id = submit_prompt(wf)
-                entry = poll_until_done(prompt_id, timeout_s=900)
+                # 30 min — accommodates Wan 2.2 14B cold load + generation matrix.
+                entry = poll_until_done(prompt_id, timeout_s=1800)
                 artifacts = download_artifacts(entry, Path(output_path).parent)
 
                 if not artifacts:

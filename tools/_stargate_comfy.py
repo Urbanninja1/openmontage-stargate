@@ -161,10 +161,16 @@ def inject_lora_stack(wf: dict, stack: list[tuple[str, float]]) -> dict:
 
 
 def submit_prompt(wf: dict) -> str:
-    """POST /prompt and return prompt_id."""
+    """POST /prompt and return prompt_id.
+
+    Filters out top-level keys starting with underscore (Stargate-local
+    documentation metadata like `_lane3b`, `_comment`, `_install_required`) —
+    ComfyUI treats every top-level key as a node and chokes on string values.
+    """
+    clean = {k: v for k, v in wf.items() if not k.startswith("_") and isinstance(v, dict)}
     r = requests.post(
         f"{COMFYUI_URL}/prompt",
-        json={"prompt": wf, "client_id": f"stargate_{uuid.uuid4().hex[:8]}"},
+        json={"prompt": clean, "client_id": f"stargate_{uuid.uuid4().hex[:8]}"},
         timeout=30,
     )
     if r.status_code != 200:
