@@ -147,11 +147,29 @@ def call_llm_step(stage: dict, *, brief: str, state: dict) -> dict:
         if r.status_code != 200:
             raise PipelineError(f"llm_step HTTP {r.status_code}: {r.text[:300]}")
         body = r.json()
-        content = body["choices"][0]["message"]["content"]
+        msg = body["choices"][0]["message"]
+        content = msg.get("content", "") or ""
+        # Thinking-mode fallback: if content is empty but reasoning_content has
+        # the JSON answer (model used all tokens on CoT and ran out), scan
+        # reasoning for the last JSON block.
+        if not content.strip() and msg.get("reasoning_content"):
+            reasoning = msg["reasoning_content"]
+            # Look for a complete JSON object in reasoning
+            import re
+            matches = re.findall(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", reasoning, re.DOTALL)
+            # Try from longest to shortest; shallow first
+            for m in sorted(matches, key=len, reverse=True):
+                try:
+                    json.loads(m)
+                    log.info("  llm_step: extracted JSON from reasoning_content (%d chars)", len(m))
+                    content = m
+                    break
+                except json.JSONDecodeError:
+                    continue
     except requests.RequestException as exc:
         raise PipelineError(f"llm_step request failed: {exc}")
 
-    log.info("  llm_step: got %d chars", len(content))
+    log.info("  llm_step: got %d chars (content)", len(content))
 
     if parse_json:
         # Try direct parse, else scan for JSON object

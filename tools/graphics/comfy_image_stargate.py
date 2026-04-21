@@ -171,7 +171,10 @@ class ComfyImageStargate(BaseTool):
                             raise
 
                 prompt_id = submit_prompt(wf)
-                entry = poll_until_done(prompt_id, timeout_s=300)
+                # 20 min — accommodates FLUX 2 Dev Q8 (18 GB) cold load + 20-step sampling + VAE decode.
+                # Klein 9B "balanced" finishes in 60-90s once loaded, but first run per-session pays 60-120s
+                # model-load tax. "best" tier routinely runs 200-400s end-to-end.
+                entry = poll_until_done(prompt_id, timeout_s=1200)
                 artifacts = download_artifacts(entry, Path(output_path).parent)
 
                 if not artifacts:

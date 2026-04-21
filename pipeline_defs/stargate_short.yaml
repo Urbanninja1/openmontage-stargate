@@ -55,7 +55,10 @@ stages:
     produces:
       - narration_script       # list of {panel_index, narration_text, image_prompt}
     llm_step:                  # pipeline_runner inline LLM
-      model: qwopus-27b
+      # qwen3.6-35b-a3b-hauhau-p6000 — persistent P6000 #0 (always-on), 45 tok/s,
+      # uncensored, content-after-thinking. User-approved model (not 397b which is
+      # too slow). max_tokens=8000 gives reasoning room + JSON output space.
+      model: qwen3.6-35b-a3b-hauhau-p6000
       system_prompt: |
         You write scripts for 60-second animated shorts. Given a brief,
         produce exactly 6 panels. Each panel is ~10 seconds of narration
@@ -71,7 +74,7 @@ stages:
 
         No prose, no markdown, no prefix — raw JSON only.
       temperature: 0.8
-      max_tokens: 2000
+      max_tokens: 8000          # Ample headroom for thinking models if we fall back
       parse_json: true
       output_key: narration_script
     required: true
@@ -87,7 +90,7 @@ stages:
     iterate_over: narration_script.panels
     iterate_key: image_prompt       # Use panel.image_prompt as the shim's `prompt`
     tool_inputs:                     # Static tool params merged into iteration
-      quality: balanced              # Klein 9B — ~52s per panel, good balance
+      quality: best                  # FLUX 2 Dev 20-step — SOTA quality (~104s/panel, 6×=10 min)
       width: 1920
       height: 1080
     required: true
