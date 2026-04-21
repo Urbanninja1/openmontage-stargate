@@ -22,6 +22,11 @@ SEARXNG_URL = "http://127.0.0.1:8888"
 
 
 class SearxngStargate(BaseTool):
+    # Lane 6: register under TWO names so pipeline YAMLs that call the
+    # phantom upstream `web_search` tool (e.g. cinematic.yaml) resolve
+    # through capability-based discovery. `name` is the identity used
+    # by registry.get(); `aliases` get re-registered post-discovery via
+    # the aliasing block at bottom of this module.
     name = "searxng_stargate"
     version = "0.1.0"
     tier = ToolTier.ANALYZE
@@ -125,3 +130,15 @@ class SearxngStargate(BaseTool):
             },
             duration_seconds=time.time() - t_start,
         )
+
+
+class WebSearchStargate(SearxngStargate):
+    """Alias registration as `web_search` so pipeline YAMLs that list the
+    phantom upstream `web_search` tool name (e.g. cinematic.yaml) resolve.
+
+    Everything else is inherited from SearxngStargate — same execute logic,
+    same rank probe, same schema. Only the registry name + provider tag
+    change so both rows appear in registry.provider_catalog()['stargate'].
+    """
+    name = "web_search"
+    provider = "stargate-alias"

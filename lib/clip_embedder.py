@@ -82,7 +82,10 @@ def embed_images(image_paths: Sequence[Union[str, Path]]) -> np.ndarray:
 
     inputs = _PROCESSOR(images=images, return_tensors="pt").to(_DEVICE)
     with torch.no_grad():
-        features = _MODEL.get_image_features(**inputs)
+        out = _MODEL.get_image_features(**inputs)
+    # transformers < 5.x returned a raw feature tensor; 5.x returns a
+    # BaseModelOutputWithPooling whose pooler_output is the projected 512-d.
+    features = out.pooler_output if hasattr(out, "pooler_output") else out
     features = features / features.norm(dim=-1, keepdim=True).clamp_min(1e-8)
     arr = features.cpu().numpy().astype(np.float32, copy=False)
     # Close PIL handles to avoid leaking file handles on Windows
@@ -116,7 +119,8 @@ def embed_texts(texts: Sequence[str]) -> np.ndarray:
         max_length=77,
     ).to(_DEVICE)
     with torch.no_grad():
-        features = _MODEL.get_text_features(**inputs)
+        out = _MODEL.get_text_features(**inputs)
+    features = out.pooler_output if hasattr(out, "pooler_output") else out
     features = features / features.norm(dim=-1, keepdim=True).clamp_min(1e-8)
     return features.cpu().numpy().astype(np.float32, copy=False)
 
