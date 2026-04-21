@@ -126,6 +126,26 @@ class IndexTTSStargate(BaseTool):
             return ToolResult(success=False,
                               error="IndexTTS-2 requires timbre reference (character or voice_id)")
 
+        # Voice+Character Phase 9 guard: fail loud if reference not on disk.
+        # See docs/solutions/integration-issues/2026-04-21-lane6-voice-references-missing.md
+        if character_id and not Path(reference_path).is_file():
+            return ToolResult(
+                success=False,
+                error=(
+                    f"voice_reference_missing: character={character_id} "
+                    f"reference_path={reference_path} does not exist on disk. "
+                    "Phase 9 (ref-capture) was cut from roadmap."
+                ),
+                duration_seconds=time.time() - t_start,
+            )
+        if emotion_ref_path and not Path(emotion_ref_path).is_file():
+            # Emotion ref is optional — log and strip rather than fail.
+            import logging
+            logging.getLogger("indextts_stargate").warning(
+                "emotion_ref_path missing on disk, dropping: %s", emotion_ref_path
+            )
+            emotion_ref_path = None
+
         output_path = inputs.get("output_path")
         if not output_path:
             OUTPUT_DIR_DEFAULT.mkdir(parents=True, exist_ok=True)

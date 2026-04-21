@@ -144,6 +144,23 @@ class FishStargateTTS(BaseTool):
             if binding and binding.reference_path:
                 reference_path = binding.reference_path
 
+        # Voice+Character Phase 9 guard: character binding is nominal-only when
+        # the reference WAV doesn't exist on disk — the service silently falls
+        # back to its default voice, which violates the Decision Communication
+        # Contract. Fail loud instead. See docs/solutions/integration-issues/
+        # 2026-04-21-lane6-voice-references-missing.md for remediation options.
+        if character_id and reference_path and not Path(reference_path).is_file():
+            return ToolResult(
+                success=False,
+                error=(
+                    f"voice_reference_missing: character={character_id} "
+                    f"reference_path={reference_path} does not exist on disk. "
+                    "Voice+Character Phase 9 (ref-capture) was cut from roadmap; "
+                    "drop a 15s WAV at the path or pass explicit reference_path."
+                ),
+                duration_seconds=time.time() - t_start,
+            )
+
         # Output path
         output_path = inputs.get("output_path")
         if not output_path:
