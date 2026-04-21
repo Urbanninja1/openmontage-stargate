@@ -47,7 +47,7 @@ class ComfyImageStargate(BaseTool):
     name = "comfy_image_stargate"
     version = "0.1.0"
     tier = ToolTier.GENERATE
-    capability = "image_gen"
+    capability = "image_generation"  # matches upstream image_selector discovery
     provider = "stargate"
     stability = ToolStability.PRODUCTION
     execution_mode = ExecutionMode.SYNC

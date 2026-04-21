@@ -51,6 +51,10 @@ MODEL_LOADER_CLASSES = {
 # Output node class_types — shim pre-validation guards against SaveImage/VHS mismatch
 VIDEO_OUTPUT_CLASSES = {"VHS_VideoCombine", "VHS_VideoSave"}
 IMAGE_OUTPUT_CLASSES = {"SaveImage", "Save Image w/Metadata", "SaveImageExtended"}
+# ace-step-music.json currently uses SaveImage as its terminal node (known
+# quirk of the ACE-Step ComfyUI integration — the image is a spectrogram of
+# the generated audio; separate audio file ships alongside).
+AUDIO_OUTPUT_CLASSES = {"SaveAudio", "VHS_AudioSave", "PreviewAudio", "SaveImage"}
 
 
 class ComfyError(Exception):

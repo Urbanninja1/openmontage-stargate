@@ -43,7 +43,7 @@ class ComfyHunyuanStargate(BaseTool):
     name = "comfy_hunyuan_stargate"
     version = "0.1.0"
     tier = ToolTier.GENERATE
-    capability = "video_gen"
+    capability = "video_generation"  # matches upstream video_selector discovery
     provider = "stargate"
     stability = ToolStability.PRODUCTION
     execution_mode = ExecutionMode.SYNC
