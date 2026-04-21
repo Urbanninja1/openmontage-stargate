@@ -1,4 +1,5 @@
 import { Composition, CalculateMetadataFunction } from "remotion";
+import { Comic, ComicProps } from "./Comic";
 import { Explainer, ExplainerProps } from "./Explainer";
 import {
   CinematicRenderer,
@@ -299,6 +300,39 @@ export const Root: React.FC = () => {
           fadeOutSeconds: 1.5,
           overlay: true,
         } as EndTagProps}
+      />
+
+      {/* Stargate-local — multi-panel comic composition (Lane 6).
+          Duration auto-scales: panels × panel_duration_seconds × fps.
+          Default 3 panels × 3s = 9s @ 30fps = 270 frames. */}
+      <Composition
+        id="Comic"
+        component={Comic}
+        durationInFrames={270}
+        fps={30}
+        width={1920}
+        height={1080}
+        defaultProps={{
+          panels: [
+            { image_path: "placeholder.png", scene_description: "panel 1",
+              dialogue: [{ speaker: "Narrator", text: "Once upon a time..." }] },
+            { image_path: "placeholder.png", scene_description: "panel 2",
+              dialogue: [{ speaker: "Narrator", text: "...the world changed." }] },
+            { image_path: "placeholder.png", scene_description: "panel 3",
+              dialogue: [{ speaker: "Narrator", text: "The end." }] },
+          ],
+          title: "Comic",
+          grid: "auto",
+          panel_duration_seconds: 3,
+        } as ComicProps}
+        calculateMetadata={({ props }) => {
+          const duration = props.panel_duration_seconds ?? 3;
+          const panels = props.panels?.length ?? 3;
+          return {
+            props,
+            durationInFrames: Math.round(panels * duration * 30),
+          };
+        }}
       />
     </>
   );

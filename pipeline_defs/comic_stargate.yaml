@@ -1,0 +1,131 @@
+name: comic_stargate
+version: "0.1"
+description: >
+  Stargate-local illustrated-story / multi-panel comic pipeline.
+  Upstream OpenMontage has no comic pipeline — this fills the gap using
+  FLUX 2 Dev + character LoRAs (via comfy_image_stargate) + optional
+  dialogue bubbles rendered in Remotion. Perfect for brief comic strips
+  driven by character personas (Dr. House coffee rant, Tony Soprano
+  sunscreen lecture, etc.).
+category: generated
+stability: beta
+
+default_checkpoint_policy: auto_noncreative
+
+extensions:
+  custom_scripts: true
+  custom_playbooks: false
+  custom_skills: false
+  custom_tools: false
+
+required_skills: []        # Stargate-local pipeline — no upstream skills required
+
+orchestration:
+  mode: executive-producer
+  skill: null              # Uses generic reviewer + default stage sequencing
+  budget_default_usd: 0.00 # Fully local — no API costs
+  max_revisions_per_stage: 2
+  max_send_backs: 1
+  max_wall_time_minutes: 15
+
+compatible_playbooks:
+  recommended: []
+  also_works: []
+  custom_allowed: true
+
+# Pipeline config — Stargate-specific
+stargate:
+  num_panels: 3            # default 3 panels; CLI --num-panels overrides
+  panel_width: 1024
+  panel_height: 1024
+  composition: Comic       # Remotion composition name (src/Comic.tsx)
+  dialogue_bubbles: true
+
+stages:
+  # ── Research (optional — only if project set) ────────────────────
+
+  - name: research
+    skill: null
+    produces:
+      - research_brief
+    tools_available:
+      - rag_platform_stargate
+      - searxng_stargate
+      - crawl4ai_stargate
+    checkpoint_required: false
+    human_approval_default: false
+    required: false        # Optional stage — skip if no project + brief not knowledge-heavy
+    review_focus:
+      - At least 3 grounded facts if project is set
+      - Fallback to SearXNG if rag_platform_stargate returns no hits
+    success_criteria:
+      - research_brief.facts has >= 0 items (empty OK if no research needed)
+
+  # ── Script & panel plan ────────────────────────────────────────
+
+  - name: script
+    skill: null
+    produces:
+      - panel_script     # list of {panel_index, scene_description, character, dialogue}
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Each panel has a scene description suitable for image_gen prompt
+      - Character dialogue is in-voice for the bound persona
+      - Story arc flows across panels (setup → action → punchline)
+    success_criteria:
+      - panel_script has exactly stargate.num_panels entries
+      - Every entry has non-empty scene_description
+      - If character is bound, every dialogue line respects persona voice
+
+  # ── Panel generation ───────────────────────────────────────────
+
+  - name: panel_gen
+    skill: null
+    produces:
+      - panel_images     # list of paths, one per panel
+    tools_available:
+      - comfy_image_stargate
+    checkpoint_required: false
+    human_approval_default: false
+    parallel: false      # Serialize to avoid ComfyUI queue depth > 3 gate
+    review_focus:
+      - Character consistency across panels (same LoRA applied)
+      - No NSFW / copyrighted-character leakage (character YAML defines bounds)
+      - Visual style coherent (consistent lighting, composition)
+    success_criteria:
+      - len(panel_images) == stargate.num_panels
+      - Every panel file exists + readable + > 100 KB (not error image)
+
+  # ── Compose (Remotion) ─────────────────────────────────────────
+
+  - name: compose
+    skill: null
+    produces:
+      - final_artifact    # MP4 or PNG sheet depending on composition mode
+    tools_available:
+      - remotion_compose
+    checkpoint_required: false
+    human_approval_default: false
+    review_focus:
+      - Dialogue bubbles legible, no clipping
+      - Panel grid uses configured layout
+      - Final artifact opens cleanly in QuickTime / VLC (MP4) or Preview (PNG)
+    success_criteria:
+      - final_artifact file exists
+      - If MP4, duration >= 3 seconds
+      - If PNG sheet, resolution >= stargate.panel_width × 3
+
+  # ── Publish (metadata + output_db registration) ────────────────
+
+  - name: publish
+    skill: null
+    produces:
+      - sidecar_metadata
+    tools_available: []
+    checkpoint_required: false
+    human_approval_default: false
+    success_criteria:
+      - Sidecar JSON written alongside MP4
+      - POST /output/record to Agent API returns 200
