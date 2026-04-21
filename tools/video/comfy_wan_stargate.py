@@ -87,7 +87,8 @@ class ComfyWanStargate(BaseTool):
             "prompt": {"type": "string"},
             "quality": {"type": "string", "enum": ["fast", "balanced", "best"], "default": "fast"},
             "kind": {"type": "string", "enum": ["t2v", "i2v", "control", "long"], "default": "t2v"},
-            "reference_image": {"type": "string", "description": "Image path (for kind=i2v or control)."},
+            "reference_image": {"type": "string", "description": "Image path (for kind=i2v or long/SVI-extend)."},
+            "reference_video": {"type": "string", "description": "Video path (for kind=control V2V)."},
             "control_type": {"type": "string", "enum": ["depth", "openpose", "canny"]},
             "duration_frames": {"type": "integer", "default": 81, "minimum": 16, "maximum": 360},
             "seed": {"type": "integer", "default": 0},
@@ -155,6 +156,16 @@ class ComfyWanStargate(BaseTool):
                 }
                 if inputs.get("reference_image"):
                     params["INPUT_IMAGE"] = inputs["reference_image"]
+                if inputs.get("reference_video"):
+                    params["INPUT_VIDEO"] = inputs["reference_video"]
+                elif kind == "control" and inputs.get("reference_image"):
+                    # Fun Control V2V wants a video — reject with a clear error
+                    # rather than silently let the workflow fail on missing placeholder.
+                    return ToolResult(
+                        success=False,
+                        error="kind=control requires reference_video (path to input clip); reference_image is for kind=i2v/long",
+                        duration_seconds=time.time() - t_start,
+                    )
 
                 wf = render_placeholders(wf, params)
 
