@@ -4,7 +4,8 @@
 
 import React from "react";
 import {
-  AbsoluteFill, Audio, Img, interpolate, Sequence, useCurrentFrame, useVideoConfig,
+  AbsoluteFill, Audio, Img, interpolate, Sequence, staticFile,
+  useCurrentFrame, useVideoConfig,
 } from "remotion";
 
 export interface StargateShortPanel {
@@ -70,9 +71,22 @@ const PanelSlide: React.FC<{ panel: StargateShortPanel; panelIndex: number }> = 
     { extrapolateRight: "clamp" },
   );
 
-  // Resolve image path — accept absolute, http, or file://
+  // Resolve image path: pipeline_runner stages relative names into --public-dir;
+  // fallback to absolute/http for backwards compat.
   let src = panel.image_path;
-  if (src && src.startsWith("/")) src = "file://" + src;
+  if (src) {
+    if (src.startsWith("http://") || src.startsWith("https://")) {
+      // leave as-is
+    } else if (src.startsWith("/")) {
+      src = "file://" + src;
+    } else {
+      try {
+        src = staticFile(src);
+      } catch {
+        // Fall through — raw relative path
+      }
+    }
+  }
 
   return (
     <AbsoluteFill style={{ opacity }}>
@@ -108,15 +122,20 @@ const PanelSlide: React.FC<{ panel: StargateShortPanel; panelIndex: number }> = 
         </div>
       )}
 
-      {/* Audio */}
-      {panel.narration_audio_path && (
-        <Audio
-          src={panel.narration_audio_path.startsWith("/")
-            ? "file://" + panel.narration_audio_path
-            : panel.narration_audio_path}
-          volume={1.0}
-        />
-      )}
+      {/* Audio — resolve relative names via staticFile */}
+      {panel.narration_audio_path && (() => {
+        let audioSrc = panel.narration_audio_path;
+        if (audioSrc.startsWith("/")) {
+          audioSrc = "file://" + audioSrc;
+        } else if (!audioSrc.startsWith("http://") && !audioSrc.startsWith("https://")) {
+          try {
+            audioSrc = staticFile(audioSrc);
+          } catch {
+            // pass through
+          }
+        }
+        return <Audio src={audioSrc} volume={1.0} />;
+      })()}
     </AbsoluteFill>
   );
 };

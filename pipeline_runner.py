@@ -378,15 +378,46 @@ def compose_short(pipeline: dict, state: dict, output_mp4: Path) -> bool:
     nscript = script_out.get("narration_script") or {}
     panels = nscript.get("panels") or []
 
+    # Remotion's headless Chromium blocks file:/// URLs ("Not allowed to load local resource").
+    # Stage assets into a run-specific public dir, reference them by relative path, and pass
+    # --public-dir so staticFile() resolves from our staged dir.
+    import shutil
+    public_dir = output_mp4.parent / f".{output_mp4.stem}_assets"
+    public_dir.mkdir(parents=True, exist_ok=True)
+
+    staged_panels = []
+    for i, img in enumerate(panel_images):
+        src = Path(img)
+        if not src.is_file():
+            log.warning("compose: panel image missing: %s", img)
+            continue
+        dst = public_dir / f"panel_{i:02d}{src.suffix}"
+        shutil.copy2(src, dst)
+        staged_panels.append(dst.name)
+
+    staged_audios = []
+    for i, aud in enumerate(narration_audios):
+        if not aud:
+            staged_audios.append(None)
+            continue
+        src = Path(aud)
+        if not src.is_file():
+            staged_audios.append(None)
+            continue
+        dst = public_dir / f"narration_{i:02d}{src.suffix}"
+        shutil.copy2(src, dst)
+        staged_audios.append(dst.name)
+
     props_data = {
         "panels": [
             {
-                "image_path": img,
+                # Relative name — resolved by Remotion staticFile() against --public-dir
+                "image_path": staged_panels[i] if i < len(staged_panels) else "",
                 "narration_text": panels[i].get("narration_text", "") if i < len(panels) else "",
-                "narration_audio_path": narration_audios[i] if i < len(narration_audios) else None,
+                "narration_audio_path": staged_audios[i] if i < len(staged_audios) else None,
                 "duration_seconds": stargate_cfg.get("panel_duration_seconds", 10),
             }
-            for i, img in enumerate(panel_images)
+            for i in range(len(staged_panels))
         ],
         "title": pipeline.get("name", "stargate_short"),
         "fps": stargate_cfg.get("fps", 30),
@@ -402,6 +433,7 @@ def compose_short(pipeline: dict, state: dict, output_mp4: Path) -> bool:
         composition,
         str(output_mp4),
         f"--props={props_file}",
+        f"--public-dir={public_dir}",
         "--log=info",
         "--concurrency=4",
     ]
