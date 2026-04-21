@@ -93,11 +93,16 @@ class Crawl4aiStargate(BaseTool):
                                   error=f"Crawl4AI HTTP {r.status_code}: {r.text[:200]}",
                                   duration_seconds=time.time() - t_start)
             data = r.json()
-            # Crawl4AI returns { results: [{url, markdown, cleaned_html, extracted_content, ...}] }
+            # Crawl4AI returns {results: [{url, markdown: {raw_markdown, ...}, cleaned_html, ...}]}
+            # The `markdown` field is a DICT, not a string — extract raw_markdown.
             first = (data.get("results") or [{}])[0]
-            markdown = first.get("markdown", "") or ""
-            title = first.get("metadata", {}).get("title", "")
-            text = first.get("cleaned_html", "") or markdown
+            md_field = first.get("markdown") or ""
+            if isinstance(md_field, dict):
+                markdown = md_field.get("raw_markdown") or md_field.get("fit_markdown") or ""
+            else:
+                markdown = str(md_field) if md_field else ""
+            title = (first.get("metadata") or {}).get("title", "")
+            text = first.get("cleaned_html") or markdown
 
         except requests.RequestException as exc:
             return ToolResult(success=False, error=f"Crawl4AI error: {exc}",

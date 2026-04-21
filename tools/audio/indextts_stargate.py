@@ -131,18 +131,31 @@ class IndexTTSStargate(BaseTool):
             OUTPUT_DIR_DEFAULT.mkdir(parents=True, exist_ok=True)
             output_path = str(OUTPUT_DIR_DEFAULT / f"indextts_{uuid.uuid4().hex[:8]}.wav")
 
+        # IndexTTS container mounts ./data/voice_references:/voices:ro.
+        # Translate host-relative data/voice_references/... → /voices/...
+        def _container_path(p: str) -> str:
+            if p.startswith("/voices/") or p.startswith("http"):
+                return p
+            if p.startswith("data/voice_references/"):
+                return "/voices/" + p[len("data/voice_references/"):]
+            if "/data/voice_references/" in p:
+                return "/voices/" + p.split("/data/voice_references/", 1)[1]
+            return p
+
+        timbre = _container_path(reference_path)
+        emo = _container_path(emotion_ref_path) if emotion_ref_path else None
+
         try:
             with stargate_mode_lease("audio_studio", duration_minutes=10):
+                # IndexTTS-2 native endpoint: /v2/tts
                 payload = {
                     "text": text,
-                    "reference_audio": reference_path,
-                    "output_format": "wav",
-                    "emotion_strength": inputs.get("emotion_strength", 0.7),
+                    "timbre_ref_path": timbre,
                 }
-                if emotion_ref_path:
-                    payload["emotion_reference"] = emotion_ref_path
+                if emo:
+                    payload["emo_audio_prompt_path"] = emo
 
-                r = requests.post(f"{INDEXTTS_URL}/synthesize", json=payload, timeout=180)
+                r = requests.post(f"{INDEXTTS_URL}/v2/tts", json=payload, timeout=300)
                 if r.status_code != 200:
                     return ToolResult(
                         success=False,
@@ -154,9 +167,27 @@ class IndexTTSStargate(BaseTool):
                     Path(output_path).write_bytes(r.content)
                 else:
                     data = r.json()
-                    src = data.get("output_path")
-                    if src and src != output_path and Path(src).is_file():
-                        Path(output_path).write_bytes(Path(src).read_bytes())
+                    # IndexTTS returns {"path": "/output/indextts/XXX.wav", ...}
+                    # container /output/indextts/ maps to host /home/edson/stargate/output/indextts/
+                    src_container = data.get("path") or data.get("output_path") or data.get("audio_path")
+                    if not src_container:
+                        return ToolResult(
+                            success=False,
+                            error=f"IndexTTS response missing path: {data}",
+                            duration_seconds=time.time() - t_start,
+                        )
+                    if src_container.startswith("/output/indextts/"):
+                        src_host = "/home/edson/stargate/output/indextts/" + src_container[len("/output/indextts/"):]
+                    else:
+                        src_host = src_container
+                    if Path(src_host).is_file():
+                        Path(output_path).write_bytes(Path(src_host).read_bytes())
+                    else:
+                        return ToolResult(
+                            success=False,
+                            error=f"IndexTTS wrote to {src_container} but not found at {src_host}",
+                            duration_seconds=time.time() - t_start,
+                        )
         except RuntimeError as exc:
             return ToolResult(success=False, error=f"mode_lease failed: {exc}",
                               duration_seconds=time.time() - t_start)

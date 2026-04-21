@@ -153,18 +153,21 @@ class FishStargateTTS(BaseTool):
         # Mode lease (audio_studio needed for 3090-side Fish engine)
         try:
             with stargate_mode_lease("audio_studio", duration_minutes=10):
+                # Fish SGLang exposes the OpenAI-compat /v1/audio/speech endpoint.
                 payload = {
-                    "text": text,
-                    "output_format": "wav",
-                    "sample_rate": 48000,
+                    "input": text,
+                    "model": "s2-pro",
+                    "response_format": "wav",
                 }
+                # Reference audio: fish SGLang accepts `voice` as a path or
+                # reference ID. Attenborough binding provides an absolute path.
                 if reference_path:
-                    payload["reference_audio_path"] = reference_path
+                    payload["voice"] = reference_path
 
                 r = requests.post(
-                    f"{FISH_URL}/synthesize",
+                    f"{FISH_URL}/v1/audio/speech",
                     json=payload,
-                    timeout=120,
+                    timeout=180,
                 )
                 if r.status_code != 200:
                     return ToolResult(
@@ -173,23 +176,8 @@ class FishStargateTTS(BaseTool):
                         duration_seconds=time.time() - t_start,
                     )
 
-                # Fish may return bytes or a JSON pointer — support both
-                ct = r.headers.get("content-type", "")
-                if "audio" in ct:
-                    Path(output_path).write_bytes(r.content)
-                else:
-                    data = r.json()
-                    if data.get("output_path"):
-                        # Service wrote to disk; copy if different
-                        src = Path(data["output_path"])
-                        if src != Path(output_path) and src.is_file():
-                            Path(output_path).write_bytes(src.read_bytes())
-                    else:
-                        return ToolResult(
-                            success=False,
-                            error=f"Fish response not audio: {str(data)[:200]}",
-                            duration_seconds=time.time() - t_start,
-                        )
+                # /v1/audio/speech always returns the audio bytes (OpenAI-compat).
+                Path(output_path).write_bytes(r.content)
 
         except RuntimeError as exc:
             return ToolResult(
