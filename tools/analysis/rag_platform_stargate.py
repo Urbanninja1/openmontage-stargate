@@ -79,6 +79,7 @@ class RagPlatformStargate(BaseTool):
             "collection_url": {"type": "string",
                                "default": "http://127.0.0.1:6333",
                                "description": "Qdrant URL; normally default."},
+            "qdrant_api_key": {"type": "string", "description": "Qdrant api-key. Falls back to QDRANT_API_KEY env."},
             "num_results": {"type": "integer", "default": 10},  # selector-compat alias
             "operation": {"type": "string", "enum": ["generate", "rank"], "default": "generate"},
             "preferred_provider": {"type": "string"},
@@ -123,16 +124,22 @@ class RagPlatformStargate(BaseTool):
         api_key = os.environ.get(RAG_API_KEY_ENV)
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
+        # Qdrant api-key: explicit param > QDRANT_API_KEY env > none.
+        qdrant_api_key = inputs.get("qdrant_api_key") or os.environ.get("QDRANT_API_KEY")
+        search_body = {
+            "collection_url": inputs.get("collection_url", "http://127.0.0.1:6333"),
+            "collection_name": f"{project}--content",
+            "query": query,
+            "top_k": top_k,
+        }
+        if qdrant_api_key:
+            search_body["qdrant_api_key"] = qdrant_api_key
+
         try:
             r = requests.post(
                 f"{RAG_URL}/v1/search",
                 headers=headers,
-                json={
-                    "collection_url": inputs.get("collection_url", "http://127.0.0.1:6333"),
-                    "collection_name": f"{project}--content",
-                    "query": query,
-                    "top_k": top_k,
-                },
+                json=search_body,
                 timeout=30,
             )
             if r.status_code == 404:
