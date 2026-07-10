@@ -38,6 +38,15 @@ These files are Stargate-local provider shims + helpers. Sync script `bin/openmo
 
 ### Stargate-local pipeline
 - `pipeline_defs/comic_stargate.yaml` — illustrated-story / multi-panel comic (no upstream equivalent)
+- `pipeline_defs/stargate_short.yaml` — Ken Burns short (script→panels→narration→compose), all-local
+- `pipeline_defs/stargate_short_smoke.yaml` — 2-panel/10s minimal variant; the E2E verify fixture path (2026-07-10)
+
+### Upstream-file divergence (kept minimal; candidates to upstream)
+- `pipeline_runner.py` — two Stargate edits (2026-07-10 E2E): per-stage `llm_step.base_url`
+  override (persistent lanes live behind :8084, not :8080), and
+  `_MODE_FOR_CAPABILITY` aliases `image_generation`/`video_generation` (shims declare
+  the long names; without the aliases the stage-level GPU-mode lease never fired and
+  every panel cold-thrashed a mode switch). The alias fix is an upstream bug candidate.
 
 ### Config
 - `config.yaml` — disables cloud providers, routes to Stargate local services
@@ -54,6 +63,14 @@ Stargate's own source tree does NOT import any OpenMontage Python — OpenMontag
 - **PR #29 (native ComfyUI provider)** — if merged, our `comfy_*_stargate.py` shims pivot to thin URL/quality-tier overrides.
 - **Issue #37 (Kokoro)** — we plan to upstream `kokoro_stargate.py` as the answer.
 - **Issue #33 (ComfyUI umbrella)** — resolved by PR #29.
+- **Runner board-blindness (2026-07-10 E2E finding)** — `pipeline_runner.py` never calls
+  `init_project`/`write_checkpoint`, so runner-driven productions are invisible to Backlot
+  unless the orchestrating agent bridges the checkpoint contract itself. Durable fix
+  (runner init/checkpoints) is upstream-shaped work.
+- **Manifest schema rejection (2026-07-10 E2E finding)** — Stargate-local manifests fail
+  upstream `pipeline_manifest.schema.json` (`additionalProperties: false` rejects
+  `stargate:`/`llm_step`/`iterate_over`/`composition`); `lib/pipeline_loader` raises, so
+  custom stage names can't be checkpointed (`CANONICAL_STAGE_ARTIFACTS` KeyError).
 
 ## Sync SOP
 

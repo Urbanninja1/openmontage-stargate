@@ -55,10 +55,13 @@ stages:
     produces:
       - narration_script       # list of {panel_index, narration_text, image_prompt}
     llm_step:                  # pipeline_runner inline LLM
-      # qwen3.6-35b-a3b-hauhau-p6000 — persistent P6000 #0 (always-on), 45 tok/s,
-      # uncensored, content-after-thinking. User-approved model (not 397b which is
-      # too slow). max_tokens=8000 gives reasoning room + JSON output space.
-      model: qwen3.6-35b-a3b-hauhau-p6000
+      # qwen3.6-27b-autoround — persistent dual-3090 NVLink unit (always loaded,
+      # zero cold-load). Reachable only via the :8084 Gate (the :8080 llama-swap
+      # default does not surface the dual unit). The prior model id
+      # (qwen3.6-35b-a3b-hauhau-p6000) is retired and served on neither endpoint.
+      # max_tokens=8000 gives reasoning room + JSON output space.
+      model: qwen3.6-27b-autoround
+      base_url: http://127.0.0.1:8084
       system_prompt: |
         You write scripts for 60-second animated shorts. Given a brief,
         produce exactly 6 panels. Each panel is ~10 seconds of narration

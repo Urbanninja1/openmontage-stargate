@@ -66,6 +66,12 @@ registry.discover()
 _MODE_FOR_CAPABILITY = {
     "video_gen": "image_studio",
     "image_gen": "image_studio",
+    # Shims declare the upstream selector-compatible capability names
+    # ("image_generation"/"video_generation"), so map those too — otherwise
+    # the stage-level lease never fires and each iteration cold-starts ComfyUI
+    # (the shim leases per-call and restores `off` after every image).
+    "image_generation": "image_studio",
+    "video_generation": "image_studio",
     "tts": None,             # Kokoro on P6000 = no switch; Fish/IndexTTS handled by shim
     "multi_speaker_tts": "audio_studio",
     "research": None,
@@ -112,6 +118,14 @@ def call_llm_step(stage: dict, *, brief: str, state: dict) -> dict:
     """Call llama-swap OpenAI-compat endpoint. Parses JSON if requested."""
     cfg = stage["llm_step"]
     model = cfg.get("model", "qwopus-27b")
+    # Per-stage endpoint override. Default LLAMASWAP_URL (:8080) only serves
+    # llama-swap-managed models; the persistent dual-3090 unit
+    # (qwen3.6-27b-autoround) is reachable only via the :8084 Gate, which is
+    # what config.yaml's llm.base_url points to. Honor a manifest base_url so
+    # a stage can target the Gate without a global runner change.
+    base_url = (cfg.get("base_url") or LLAMASWAP_URL).rstrip("/")
+    if base_url.endswith("/v1"):
+        base_url = base_url[:-3]
     system = cfg.get("system_prompt", "")
     temperature = cfg.get("temperature", 0.7)
     max_tokens = cfg.get("max_tokens", 2000)
@@ -132,7 +146,7 @@ def call_llm_step(stage: dict, *, brief: str, state: dict) -> dict:
 
     try:
         r = requests.post(
-            f"{LLAMASWAP_URL}/v1/chat/completions",
+            f"{base_url}/v1/chat/completions",
             json={
                 "model": model,
                 "messages": [

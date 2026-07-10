@@ -1,0 +1,112 @@
+name: stargate_short_smoke
+version: "0.1"
+description: >
+  SMALLEST valid stargate_short production — E2E smoke of the video door.
+  2 panels x 5s = 10s clip. Klein-4B fast tier (8-step, 1024x1024, ~15s/panel),
+  Kokoro narration, Remotion StargateShort ken-burns compose. Derived from
+  stargate_short.yaml with the panel count/duration/quality minimized. Same
+  runner (pipeline_runner.py), same board-blind output path (output/productions/).
+category: generated
+stability: beta
+
+default_checkpoint_policy: auto_noncreative
+
+extensions:
+  custom_scripts: true
+
+required_skills: []
+
+orchestration:
+  mode: executive-producer
+  skill: null
+  budget_default_usd: 0.00
+  max_wall_time_minutes: 15
+
+stargate:
+  num_panels: 2
+  panel_duration_seconds: 5
+  panel_width: 1024
+  panel_height: 1024
+  fps: 30
+  composition: StargateShort
+  narration_engine: kokoro
+  total_duration_seconds: 10
+
+stages:
+  - name: research
+    skill: null
+    produces:
+      - research_notes
+    tools_available:
+      - searxng_stargate
+    checkpoint_required: false
+    required: false
+
+  - name: script
+    skill: null
+    produces:
+      - narration_script
+    llm_step:
+      model: qwen3.6-27b-autoround
+      base_url: http://127.0.0.1:8084
+      system_prompt: |
+        You write scripts for very short animated clips. Given a brief,
+        produce exactly 2 panels. Each panel is ~5 seconds of narration
+        (~10-14 words) and a vivid image prompt for FLUX 2 Klein.
+
+        Respond ONLY with valid JSON matching this schema:
+        {
+          "panels": [
+            {"narration_text": "...", "image_prompt": "..."},
+            {"narration_text": "...", "image_prompt": "..."}
+          ]
+        }
+
+        No prose, no markdown, no prefix — raw JSON only.
+      temperature: 0.8
+      max_tokens: 3000
+      parse_json: true
+      output_key: narration_script
+    required: true
+
+  - name: panel_gen
+    skill: null
+    produces:
+      - panel_images
+    tools_available:
+      - comfy_image_stargate
+    iterate_over: narration_script.panels
+    iterate_key: image_prompt
+    tool_inputs:
+      quality: fast              # klein-4b, 8-step, ~15s/panel — smallest step count
+      width: 1024
+      height: 1024
+    required: true
+
+  - name: narration
+    skill: null
+    produces:
+      - narration_audio
+    tools_available:
+      - kokoro_stargate
+    llm_step: null
+    iterate_over: narration_script.panels
+    iterate_key: narration_text
+    tool_inputs:
+      voice_id: af_heart
+    required: true
+
+  - name: compose
+    skill: null
+    produces:
+      - final_mp4
+    tools_available: []
+    composition: StargateShort
+    required: true
+
+  - name: publish
+    skill: null
+    produces:
+      - sidecar
+    tools_available: []
+    required: true
