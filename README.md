@@ -13,11 +13,21 @@
   <a href="#pipelines">Pipelines</a> &nbsp;·&nbsp;
   <a href="#how-it-works">How It Works</a> &nbsp;·&nbsp;
   <a href="docs/PROVIDERS.md">Providers</a> &nbsp;·&nbsp;
+  <a href="docs/PR_REVIEW_GUIDE.md">Review Guide</a> &nbsp;·&nbsp;
   <a href="AGENT_GUIDE.md">Agent Guide</a>
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPLv3-blue.svg" alt="License"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/trending">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset=".github/assets/repo-of-the-day-dark.svg">
+      <img alt="🏆 #1 Repository of the Day on GitHub Trending" src=".github/assets/repo-of-the-day-light.svg" height="60">
+    </picture>
+  </a>
 </p>
 
 <p align="center"><strong>Follow The Build</strong></p>
@@ -47,6 +57,12 @@ Turn your AI coding assistant into a full video production studio. Describe what
 > **"THE LAST BANANA"** — a 60-second Pixar-style animated short about a lonely banana who finds friendship with a kiwi. 6 Kling v3-generated motion clips (via fal.ai), Google Chirp3-HD narration, royalty-free piano music, TikTok-style word-level captions, and Remotion composition. Total cost: **$1.33**.
 
 <div align="center">
+  <video src="https://github.com/user-attachments/assets/e03b5d1f-1199-4093-9f31-a43aa9da2c68" width="100%" controls></video>
+</div>
+
+> **"The Library at Alexandria"** — a 70-second history elegy on what humanity lost in a single night. Five hand-authored scenes — an illuminated manuscript page, cascading scroll-tags, a Burning Counter ticking 700,000 → 0 inside a candle's flame, a charred vellum fragment with surviving Greek, and an empty void — set to OpenAI 'ash' narration and a free Pixabay strings score. Total cost: **$0.02**. Built through OpenMontage's atelier (bespoke) composition mode — every scene crafted from scratch, no shared components.
+
+<div align="center">
   <video src="https://github.com/user-attachments/assets/8a6d2cc3-7ad2-46f5-922f-a8e3e5848d9f" width="100%" controls></video>
 </div>
 
@@ -63,12 +79,6 @@ Turn your AI coding assistant into a full video production studio. Describe what
 </div>
 
 > **"Mori no Seishin"** — a Ghibli-style anime animation of a forest spirit's journey through ancient woods. 12 FLUX-generated images with parallax crossfade, drift and pan camera motion, firefly and petal particles, cinematic vignette lighting, and ambient forest soundtrack. Total cost: **$0.15**. Still images brought to life through Remotion's animation engine.
-
-<div align="center">
-  <video src="https://github.com/user-attachments/assets/9cf633d9-c264-4961-bfd0-b1db188654aa" width="100%" controls></video>
-</div>
-
-> **"Into the Abyss"** — a deep ocean exploration rendered in anime style. Bioluminescent gardens, coral cathedrals, and creatures of light — 12 FLUX-generated images with sparkle and mist particle overlays, light-ray effects, smooth camera motion, and ambient oceanic soundtrack. Total cost: **$0.15**. Zero video generation APIs needed.
 
 <p align="center">
   <a href="https://www.youtube.com/@OpenMontage?sub_confirmation=1"><strong>Subscribe to @OpenMontage on YouTube</strong></a> to see new videos as they ship — every video includes the full prompt, pipeline, tools used, and cost so you can reproduce it yourself.
@@ -98,6 +108,36 @@ What you get back is not "best guess prompt spaghetti." You get:
 - **What it will actually look like** with your currently available tools
 
 Works with **Claude Code, Cursor, Copilot, Windsurf, Codex** — any AI coding assistant that can read files and run code.
+
+---
+
+## Watch It Happen — The Backlot Living Storyboard
+
+Chat tells you what the agent *said*. **Backlot shows you what the production is actually doing** — a local board that fills itself in as the pipeline runs. Stages light up, the script lands as a screenplay page, scene cards shimmer while assets generate, and every provider decision and dollar spent is on the wall.
+
+When a production starts, the agent opens it for you automatically. No setup, no reporting — the board derives everything from the project files the pipeline already writes.
+
+<p align="center"><img src="docs/images/backlot/board-live.png" alt="Backlot live board — assets generating" width="920"></p>
+
+**The storyboard is now a real approval gate.** Asset generation pauses on a scene-by-scene contact sheet — takes, prompts, per-asset cost, quality scores — so you approve the visuals *before* the render, not after it's too late:
+
+<p align="center"><img src="docs/images/backlot/storyboard.png" alt="Backlot storyboard — filmstrip with takes and renders" width="920"></p>
+
+Creative gates hold until you answer. The board shows what's waiting and why; you reply in chat:
+
+<p align="center"><img src="docs/images/backlot/script-gate.png" alt="Backlot script gate — awaiting approval" width="920"></p>
+
+Every production on your machine, live-first, in the library:
+
+<p align="center"><img src="docs/images/backlot/library.png" alt="Backlot library" width="920"></p>
+
+```bash
+python -m backlot open                  # the library — every project on disk
+python -m backlot open <project-id>     # one production's live board
+python scripts/backlot_simulate_run.py  # no production yet? watch a simulated one live
+```
+
+And when a run is done, hit **▶ REPLAY RUN** — the whole production replays from its timestamps, scrubbable end to end. See [`backlot/README.md`](backlot/README.md) for how it works.
 
 ---
 
@@ -132,7 +172,9 @@ Or if you want the real-footage path:
 
 That's it. The agent researches your topic with live web search, generates AI images, writes and narrates the script with voice direction, finds royalty-free background music automatically, burns in word-level subtitles, and renders the final video. Before you see anything, the system runs a multi-point self-review — ffprobe validation, frame sampling, audio level analysis, delivery promise verification, and subtitle checks. Every provider selection is scored across 7 dimensions with an auditable decision log. Every creative decision gets your approval.
 
-> **No `make`?** Run manually: `pip install -r requirements.txt && cd remotion-composer && npm install && cd .. && pip install piper-tts && cp .env.example .env`
+> **No `make`?** macOS/Linux: `python3 -m venv .venv && source .venv/bin/activate && python -m pip install -r requirements.txt && cd remotion-composer && npm install && cd .. && python -m pip install piper-tts && cp .env.example .env`
+>
+> Windows PowerShell: `py -3 -m venv .venv; .\.venv\Scripts\Activate.ps1; python -m pip install -r requirements.txt; cd remotion-composer; npm install; cd ..; python -m pip install piper-tts; Copy-Item .env.example .env`
 >
 > **Windows:** If `npm install` fails with `ERR_INVALID_ARG_TYPE`, use `npx --yes npm install` instead.
 
@@ -171,7 +213,7 @@ SUNO_API_KEY=your-key          # Full songs, instrumentals, any genre
 
 # Voice & images:
 ELEVENLABS_API_KEY=your-key    # Premium TTS, AI music, sound effects
-OPENAI_API_KEY=your-key        # OpenAI TTS, DALL-E 3 images
+OPENAI_API_KEY=your-key        # OpenAI TTS, GPT Image 2 images
 XAI_API_KEY=your-key           # xAI Grok image edits/generation + Grok video generation
 GOOGLE_API_KEY=your-key        # Google Imagen images, Google TTS (700+ voices)
 
@@ -205,15 +247,16 @@ You don't need paid API keys to make real videos. Out of the box, `make setup` g
 | **Open footage** | Archive.org + NASA + Wikimedia Commons | Free/open archival footage, educational media, and documentary texture |
 | **Extra stock** | Pexels + Unsplash + Pixabay | Free stock footage/images (developer keys are free to get) |
 | **Composition (React)** | Remotion | React-based rendering — spring-animated image scenes, text cards, stat cards, charts, TikTok-style word-level captions, TalkingHead |
-| **Composition (HTML/GSAP)** | HyperFrames | HTML/CSS/GSAP rendering — kinetic typography, product promos, launch reels, registry blocks, website-to-video |
+| **Composition (HTML/GSAP)** | HyperFrames | HTML/CSS/GSAP rendering — kinetic typography, product promos, launch reels, registry blocks, website-to-video, rigged SVG character animation |
 | **Post-production** | FFmpeg | Encoding, subtitle burn-in, audio mixing, color grading |
 | **Subtitles** | Built-in | Auto-generated captions with word-level timing |
 
-OpenMontage picks between Remotion and HyperFrames at proposal time (locked as `render_runtime`). Remotion is the default for data-driven explainers and anything using the existing React scene stack; HyperFrames is the default for motion-graphics-heavy briefs that express naturally as HTML + GSAP. See `skills/core/hyperframes.md` for the full decision matrix.
+OpenMontage picks between Remotion and HyperFrames at proposal time (locked as `render_runtime`). Remotion is the default for data-driven explainers and anything using the existing React scene stack; HyperFrames is the default for motion-graphics-heavy briefs that express naturally as HTML + GSAP, including the `character-animation` pipeline's SVG/GSAP rig output. See `skills/core/hyperframes.md` for the full decision matrix.
 
 **Two free-ish paths:**
 
 - **Image-based video:** Piper narrates your script, images provide the visuals, and Remotion animates them into a polished edit.
+- **Local character animation:** SVG rigs, pose libraries, GSAP timelines, and HyperFrames render cartoon character acting to `projects/<project-name>/renders/final.mp4`.
 - **Real-footage video:** the documentary montage pipeline builds a CLIP-searchable corpus from Archive.org, NASA, Wikimedia Commons, and optional free-key sources like Pexels and Unsplash, then cuts together actual motion footage into a finished video.
 
 If you want the second one, prompt for a **documentary montage**, **tone poem**, or **stock-footage collage**, and explicitly say **use real footage only**.
@@ -374,8 +417,8 @@ OpenMontage/
 │   ├── avatar/         # Talking head, lip sync
 │   └── subtitle/       # SRT/VTT generation
 │
-├── pipeline_defs/      # 11 YAML pipeline manifests (the agent's playbook)
-├── skills/             # 124 Markdown skill files (the agent's knowledge)
+├── pipeline_defs/      # YAML pipeline manifests (the agent's playbook)
+├── skills/             # Markdown skill files (the agent's knowledge)
 │   ├── pipelines/      # Per-pipeline stage director skills
 │   ├── creative/       # Creative technique skills
 │   ├── core/           # Core tool skills
@@ -393,7 +436,7 @@ OpenMontage/
 ```
 Layer 1: tools/ + pipeline_defs/     "What exists" — executable capabilities + orchestration
 Layer 2: skills/                     "How to use it" — OpenMontage conventions and quality bars
-Layer 3: .agents/skills/             "How it works" — 47 external technology knowledge packs
+Layer 3: .agents/skills/             "How it works" — external technology knowledge packs
 ```
 
 Each tool declares which Layer 3 skills it relies on. The agent reads Layer 1 to know what's available, Layer 2 to know how OpenMontage wants it used, and Layer 3 for deep technical knowledge when needed.
@@ -434,7 +477,7 @@ Each tool declares which Layer 3 skills it relies on. The agent reads Layer 1 to
 | **FLUX** | Cloud API | State-of-the-art quality |
 | **Google Imagen** | Cloud API | Imagen 4 — high-quality, multiple aspect ratios |
 | **Grok Imagine Image** | Cloud API | Strong image edits, style transfer, and multi-image compositing |
-| **DALL-E 3** | Cloud API | OpenAI's image model |
+| **GPT Image 2** | Cloud API | OpenAI's image model |
 | **Recraft** | Cloud API | Design-focused generation |
 | **Local Diffusion** | Local GPU | Stable Diffusion, free |
 | **Pexels** | Stock | Free stock images |
@@ -509,7 +552,7 @@ Each tool declares which Layer 3 skills it relies on. The agent reads Layer 1 to
 | Engine | Type | What It Does |
 |--------|------|-------------|
 | **Remotion** | Local (Node.js) | React-based programmatic video — spring-animated image scenes, stat reveals, section titles, hero cards, TikTok-style word-by-word captions, scene transitions (fade/slide/wipe/flip), Google Fonts, audio with fade curves, and the TalkingHead avatar composition. **When no video generation providers are configured, the agent generates still images and Remotion turns them into fully animated video.** |
-| **HyperFrames** | Local (Node.js ≥ 22) | HTML/CSS/GSAP programmatic video — kinetic typography, product promos, launch reels, custom motion graphics, registry blocks (data charts, grain overlays, shader transitions), website-to-video workflows. Consumed via `npx @hyperframes/cli`; no monorepo checkout needed. |
+| **HyperFrames** | Local (Node.js ≥ 22) | HTML/CSS/GSAP programmatic video — kinetic typography, product promos, launch reels, custom motion graphics, registry blocks (data charts, grain overlays, shader transitions), website-to-video workflows, and rigged SVG character animation. Consumed via `npx hyperframes`; no monorepo checkout needed. |
 | **FFmpeg** | Local | Core video assembly, encoding, subtitle burn, audio muxing, color grading |
 
 Runtime is chosen at proposal (`render_runtime`) and locked through `edit_decisions`. Silent swaps between runtimes are a governance violation — see `skills/core/hyperframes.md`.
@@ -555,6 +598,7 @@ OpenMontage treats video production like real engineering — with quality gates
 
 ### Quality Gates
 
+- **Human approval gates are enforced, not suggested** — proposal, script, scene plan, generated assets, and publish all pause for your sign-off. The checkpoint writer rejects a "completed" gated stage without recorded approval, and every superseded checkpoint is archived so the audit trail (including gate transitions) survives revisions. Review happens visually on the [Backlot board](#watch-it-happen--the-backlot-living-storyboard).
 - **Pre-compose validation** — blocks render if the delivery promise is violated (e.g. "motion-led" video with 80% still images), slideshow risk score is critical, or renderer family is missing. Catches broken plans before wasting GPU time.
 - **Post-render self-review** — after every render, the runtime runs ffprobe validation, extracts frames at 4 positions to check for black frames and broken overlays, analyzes audio levels for silence and clipping, verifies the delivery promise was honored, and checks subtitle presence. If the review fails, the video is not presented.
 - **Slideshow risk scoring** — 6-dimension analysis (repetition, decorative visuals, weak motion, shot intent, typography overreliance, unsupported cinematic claims) prevents "animated PowerPoint" outputs.
@@ -654,6 +698,18 @@ make test
 
 ---
 
+## Star History
+
+<a href="https://www.star-history.com/?repos=calesthio%2FOpenMontage&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=calesthio/OpenMontage&type=date&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=calesthio/OpenMontage&type=date&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/image?repos=calesthio/OpenMontage&type=date&legend=top-left" />
+  </picture>
+</a>
+
+---
+
 ## License
 
 [GNU AGPLv3](LICENSE)
@@ -662,4 +718,6 @@ make test
 
 **OpenMontage** — Production-grade video with real quality enforcement, orchestrated by your AI assistant.
 
-If this project looks useful to you, a star would really mean a lot — it helps others discover it too.
+If this project looks useful to you, a ⭐ would really mean a lot — it helps others discover it too.
+
+If you'd like to go further, [sponsor the project](https://github.com/sponsors/calesthio) — OpenMontage is built nights and weekends, and your support makes that sustainable.

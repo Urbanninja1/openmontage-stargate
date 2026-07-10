@@ -216,7 +216,7 @@ class SeedanceVideo(BaseTool):
                 payload["image_url"] = inputs["image_url"]
             elif inputs.get("image_path"):
                 from tools.video._shared import upload_image_fal
-                payload["image_url"] = upload_image_to_fal(inputs["image_path"])
+                payload["image_url"] = upload_image_fal(inputs["image_path"])
             if inputs.get("end_image_url"):
                 payload["end_image_url"] = inputs["end_image_url"]
 
@@ -224,7 +224,7 @@ class SeedanceVideo(BaseTool):
             ref_image_urls = list(inputs.get("reference_image_urls") or [])
             for local_path in inputs.get("reference_image_paths") or []:
                 from tools.video._shared import upload_image_fal
-                ref_image_urls.append(upload_image_to_fal(local_path))
+                ref_image_urls.append(upload_image_fal(local_path))
             # Seedance 2.0 reference-to-video ceilings: 9 images + 3 video + 3 audio.
             if len(ref_image_urls) > 9:
                 return ToolResult(
@@ -257,7 +257,7 @@ class SeedanceVideo(BaseTool):
 
         try:
             submit_resp = requests.post(
-                f"https://queue.fal.run/fal-ai/{model_path}",
+                f"https://queue.fal.run/{model_path}",
                 headers=headers,
                 json=payload,
                 timeout=30,
@@ -305,7 +305,7 @@ class SeedanceVideo(BaseTool):
             success=True,
             data={
                 "provider": "seedance",
-                "model": f"fal-ai/{model_path}",
+                "model": model_path,
                 "prompt": inputs["prompt"],
                 "operation": operation,
                 "variant": variant,
@@ -321,5 +321,5 @@ class SeedanceVideo(BaseTool):
             artifacts=[str(output_path)],
             cost_usd=self.estimate_cost(inputs),
             duration_seconds=round(time.time() - start, 2),
-            model=f"fal-ai/{model_path}",
+            model=model_path,
         )
