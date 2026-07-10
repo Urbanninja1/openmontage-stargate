@@ -49,7 +49,6 @@ stages:
     produces:
       - research_brief
     tools_available:
-      - rag_platform_stargate
       - searxng_stargate
       - crawl4ai_stargate
     checkpoint_required: false
@@ -57,7 +56,7 @@ stages:
     required: false        # Optional stage — skip if no project + brief not knowledge-heavy
     review_focus:
       - At least 3 grounded facts if project is set
-      - Fallback to SearXNG if rag_platform_stargate returns no hits
+      - Use SearXNG for cited source discovery
     success_criteria:
       - research_brief.facts has >= 0 items (empty OK if no research needed)
 

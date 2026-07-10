@@ -6,16 +6,15 @@
 # See docs/specs/openmontage.md and docs/plans/2026-04-20-feat-lane-6-openmontage-fork-plan.md
 
 llm:
-  provider: openai              # OpenAI-compat adapter → llama-swap
-  model: qwopus-27b
-  base_url: http://127.0.0.1:8080/v1
+  provider: openai              # OpenAI-compat adapter -> Stargate Gate
+  model: qwen3.6-27b-autoround
+  base_url: http://127.0.0.1:8084/v1
   temperature: 0.7
-  max_tokens: 4096
   per_stage_model:
-    research: qwopus-27b
+    research: qwen3.6-27b-autoround
     script: qwen3.5-397b
-    review: qwen3.6-35b-a3b-hauhau-p6000
-    storyboard_annotate: gemma-4-31b-uncensored
+    review: qwen3.6-27b-autoround
+    storyboard_annotate: qwen3.6-27b-autoround
 
 budget:
   mode: observe                  # observe | warn | cap
@@ -50,9 +49,9 @@ paths:
 providers:
   allowlist:
     tts: [fish_stargate, kokoro_stargate, indextts_stargate, ensemble_stargate, piper_tts]
-    video_gen: [comfy_wan_stargate, comfy_hunyuan_stargate]
+    video_gen: [comfyui_video, comfy_wan_stargate]
     image_gen: [comfy_image_stargate]
-    research: [rag_platform_stargate, searxng_stargate, crawl4ai_stargate]
+    research: [searxng_stargate, crawl4ai_stargate]
     multi_speaker_tts: [ensemble_stargate]
     url_extract: [crawl4ai_stargate]
     web_search: [searxng_stargate]
@@ -89,10 +88,9 @@ rendering:
   chromium_gl: angle-egl
 
 mode_lease:
-  provider: stargate_rag_platform
-  lease_base: http://127.0.0.1:8104/v1/runtime/mode
+  provider: stargate_mode_manager
   default_duration_minutes: 90
-  fallback_switch_url: http://127.0.0.1:8096/voice/mode
+  switch_url: http://127.0.0.1:8096/voice/mode
 
 character:
   source: /home/edson/stargate/data/characters

@@ -6,7 +6,7 @@ This is `Urbanninja1/openmontage-stargate`, a fork of [`calesthio/OpenMontage`](
 
 These files are Stargate-local provider shims + helpers. Sync script `bin/openmontage-sync.sh` (in the Stargate repo) refuses to merge upstream changes that touch any `*_stargate*` file — none should exist upstream since `_stargate` is our reserved suffix.
 
-### Shims (14)
+### Shims (13)
 
 **Audio (5):**
 - `tools/audio/fish_stargate.py` — Fish S2-PRO SGLang-Omni (capability=tts)
@@ -22,10 +22,9 @@ These files are Stargate-local provider shims + helpers. Sync script `bin/openmo
 **Graphics (1):**
 - `tools/graphics/comfy_image_stargate.py` — ComfyUI FLUX 2 Dev + Klein 9B/4B (capability=image_generation)
 
-**Analysis (4):**
+**Analysis (3):**
 - `tools/analysis/searxng_stargate.py` — SearXNG (capability=web_search); also registers a `WebSearchStargate` subclass under the bare name `web_search` to satisfy pipeline YAMLs that list the phantom upstream tool
 - `tools/analysis/crawl4ai_stargate.py` — Crawl4AI (capability=url_extract)
-- `tools/analysis/rag_platform_stargate.py` — Projects RAG (capability=research) — no upstream equivalent
 - `tools/analysis/parakeet_stargate.py` — Parakeet v3 STT (capability=analysis) — auto-resamples to 16 kHz mono; fallback to upstream `transcriber` (faster-whisper)
 
 **Avatar (2):**
@@ -34,8 +33,8 @@ These files are Stargate-local provider shims + helpers. Sync script `bin/openmo
 
 ### Shared helpers (3)
 - `tools/_stargate_character.py` — 14-character YAML loader + brief-text detection
-- `tools/_stargate_comfy.py` — ComfyUI dispatch (resolve_workflow, render_placeholders, inject_lora_stack, submit_prompt, poll_until_done, download_artifacts, validate_output_nodes). **Sets `CUDA_DEVICE_ORDER=PCI_BUS_ID` + `CUDA_VISIBLE_DEVICES=2,3` defaults at module import** so every shim-spawned subprocess sees the Mode-C 3090 pair.
-- `tools/_stargate_mode_lease.py` — pipeline-scoped mode lease via RAG Platform. Reads `STARGATE_RAG_API_KEY` from env, then falls back to `/home/edson/stargate/data/secrets/lane6.env` or `/etc/stargate/secrets/lane6.env`. Fallback to per-stage `POST /voice/mode` on Agent API if Platform lease unreachable.
+- `tools/_stargate_comfy.py` — ComfyUI dispatch (resolve_workflow, render_placeholders, inject_lora_stack, submit_prompt, poll_until_done, download_artifacts, validate_output_nodes). GPU ownership remains entirely with Stargate's mode manager and the ComfyUI unit.
+- `tools/_stargate_mode_lease.py` — compatibility context manager over the authoritative Agent API mode transition. It always restores `off` on exit.
 
 ### Stargate-local pipeline
 - `pipeline_defs/comic_stargate.yaml` — illustrated-story / multi-panel comic (no upstream equivalent)
